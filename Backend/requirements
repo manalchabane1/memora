@@ -1,0 +1,28 @@
+# Django core
+Django>=4.2
+djangorestframework
+
+# Auth / CORS
+django-cors-headers
+
+# Environment variables
+python-dotenv
+
+# HTTP requests (Gemini API)
+requests
+
+# PDF processing
+PyMuPDF
+pdfplumber
+
+# Data handling (optional but useful)
+numpy
+
+# AI / text processing helpers
+tiktoken
+
+# Validation / parsing
+pydantic
+
+# Image handling (optional if needed)
+Pillow
