@@ -1,24 +1,21 @@
-# Python
+# Python cache
 __pycache__/
 *.pyc
 
-# Environment
-.env
+# Virtual environments
 venv/
+Backend/venv/
+
+# Environment variables / secrets
+.env
+Backend/.env
 
 # Database
 db.sqlite3
+Backend/db.sqlite3
 
 # VS Code
 .vscode/
 
 # OS files
 .DS_Store
-
-Backend/venv/
-venv/
-.env
-Backend/.env
-__pycache__/
-*.pyc
-Backend/db.sqlite3
