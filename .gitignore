@@ -14,3 +14,11 @@ db.sqlite3
 
 # OS files
 .DS_Store
+
+Backend/venv/
+venv/
+.env
+Backend/.env
+__pycache__/
+*.pyc
+Backend/db.sqlite3
