@@ -19,3 +19,10 @@ Backend/db.sqlite3
 
 # OS files
 .DS_Store
+
+
+# Node modules
+node_modules/
+
+# Frontend build
+dist/

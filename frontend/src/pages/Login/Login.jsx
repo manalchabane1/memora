@@ -1,0 +1,190 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Mail, Lock, Eye, EyeOff, Sparkles, ArrowRight, User } from "lucide-react";
+import memiImage from "/src/assets/mascot.png";
+
+function Login() {
+  const navigate = useNavigate();
+
+  const [isSignup, setIsSignup] = useState(false);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("email@memora.app");
+  const [password, setPassword] = useState("memora2026");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    navigate("/dashboard");
+  };
+
+  return (
+    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2 bg-[#F8FAFC] font-[Poppins] overflow-hidden">
+      <section className="hidden lg:flex relative flex-col justify-between bg-gradient-to-br from-[#8B6CF6] to-[#A78BFA] p-8 text-white overflow-hidden">
+        <div className="relative z-10 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center backdrop-blur">
+            <img src="/src/assets/logo.png" alt="logo" />
+          </div>
+
+          <div>
+            <h1 className="text-2xl font-extrabold leading-none">Memora</h1>
+            <p className="text-white/80 text-xs mt-1">Ton cerveau t’adora</p>
+          </div>
+        </div>
+
+        <div className="relative z-10 flex justify-center">
+          <div className="absolute w-64 h-64 rounded-full bg-white/10 blur-3xl" />
+
+          <img
+            src={memiImage}
+            alt="Memi mascotte"
+            className="relative w-[260px] h-[260px] object-cover rounded-[42px] shadow-2xl border-4 border-white/30 animate-[float_4s_ease-in-out_infinite]"
+          />
+
+          <Sparkles className="absolute top-2 right-36 text-[#FBBF24] w-7 h-7" />
+          <Sparkles className="absolute bottom-6 left-36 text-white w-5 h-5" />
+        </div>
+
+        <div className="relative z-10 text-center mb-4">
+          <h2 className="text-4xl font-extrabold tracking-tight">
+            Prêt à tout déchirer ?
+          </h2>
+
+          <p className="mt-4 text-white/85 text-base max-w-md mx-auto leading-relaxed">
+            Memi t'attend pour réviser, comprendre et réussir.
+          </p>
+        </div>
+
+        <div className="absolute -top-20 -left-20 w-72 h-72 bg-[#60A5FA]/30 rounded-full blur-3xl" />
+        <div className="absolute -bottom-20 -right-20 w-72 h-72 bg-[#FBBF24]/25 rounded-full blur-3xl" />
+      </section>
+
+      <section className="relative flex items-center justify-center px-6 py-8">
+        <div className="absolute inset-0 opacity-60 bg-[radial-gradient(#DDD6FE_1px,transparent_1px)] [background-size:22px_22px]" />
+
+        <div className="relative w-full max-w-[380px]">
+          <div className="mb-6">
+            <div className="inline-flex items-center gap-2 rounded-full bg-[#8B6CF6]/10 text-[#8B6CF6] px-4 py-1.5 text-xs font-bold mb-4">
+              <Sparkles className="w-3 h-3" />
+              {isSignup ? "Bienvenue !" : "Bon retour !"}
+            </div>
+
+            <h1 className="text-4xl font-extrabold text-[#1E293B] tracking-tight leading-tight">
+              {isSignup ? "Créer ton compte" : "Connecte-toi à Memora"}
+            </h1>
+
+            <p className="text-slate-500 mt-3 text-sm">
+              Révise mieux, progresse chaque jour.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {isSignup && (
+              <div>
+                <label className="block text-sm font-bold text-[#1E293B] mb-2">
+                  Nom complet
+                </label>
+
+                <div className="relative">
+                  <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Faiza"
+                    className="w-full h-12 rounded-2xl border border-slate-200 bg-white pl-11 pr-4 text-sm font-medium text-[#1E293B] outline-none transition focus:ring-2 focus:ring-[#8B6CF6]"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-bold text-[#1E293B] mb-2">
+                Adresse e-mail
+              </label>
+
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="toi@memora.app"
+                  className="w-full h-12 rounded-2xl border border-slate-200 bg-white pl-11 pr-4 text-sm font-medium text-[#1E293B] outline-none transition focus:ring-2 focus:ring-[#8B6CF6]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <label className="text-sm font-bold text-[#1E293B]">
+                  Mot de passe
+                </label>
+
+                {!isSignup && (
+                  <button
+                    type="button"
+                    className="text-sm font-bold text-[#8B6CF6] hover:underline"
+                  >
+                    Oublié ?
+                  </button>
+                )}
+              </div>
+
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full h-12 rounded-2xl border border-slate-200 bg-white pl-11 pr-12 text-sm font-medium text-[#1E293B] outline-none transition focus:ring-2 focus:ring-[#8B6CF6]"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#1E293B]"
+                >
+                  {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
+                </button>
+              </div>
+            </div>
+
+            {!isSignup && (
+              <label className="flex items-center gap-2 text-sm text-slate-500">
+                <input type="checkbox" className="w-4 h-4 accent-[#8B6CF6]" />
+                Se souvenir de moi
+              </label>
+            )}
+
+            <button
+              type="submit"
+              className="w-full h-12 rounded-2xl bg-[#8B6CF6] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-[0_16px_30px_-14px_rgba(139,108,246,0.9)] hover:bg-[#7C3AED] hover:-translate-y-0.5 active:scale-[0.98] transition"
+            >
+              {isSignup ? "Créer mon compte" : "Entrer dans Memora"}
+              <ArrowRight size={19} />
+            </button>
+          </form>
+
+          <div className="flex items-center gap-4 my-6 text-slate-400 text-sm">
+            <div className="h-px flex-1 bg-slate-200" />
+            ou
+            <div className="h-px flex-1 bg-slate-200" />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsSignup(!isSignup)}
+            className="w-full h-12 rounded-2xl border border-slate-200 bg-white text-[#1E293B] font-bold text-sm hover:bg-slate-50 transition"
+          >
+            {isSignup ? "J’ai déjà un compte" : "Créer un compte étudiant"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export default Login;
