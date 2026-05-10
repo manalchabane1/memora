@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getCourses, uploadCoursePDF } from "../../services/api";
 import {
   Search,
   Plus,
@@ -30,6 +31,33 @@ function Courses() {
   const [openCourse, setOpenCourse] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [newSubject, setNewSubject] = useState("");
+  
+  useEffect(() => {
+  async function loadCourses() {
+    try {
+      const data = await getCourses();
+
+      const formatted = data.map((course) => ({
+        id: course.id,
+        title: course.title,
+        subjectId: "general",
+        description: "PDF importé dans la base Django.",
+        chapters: ["Résumé du document", "Notions importantes", "Questions possibles"],
+        progress: 0,
+        totalTime: "0h 00",
+        lastStudied: "À l’instant",
+        summary: "Résumé IA en attente.",
+        fileName: course.file?.split("/").pop() || "PDF",
+      }));
+
+      setCourses(formatted);
+    } catch (error) {
+      console.error("Erreur chargement cours :", error);
+    }
+  }
+
+  loadCourses();
+}, []);
 
   const getSubject = (id) =>
     subjects.find((s) => s.id === id) || {
@@ -50,7 +78,7 @@ function Courses() {
     fileInputRef.current?.click();
   };
 
-  const handleFiles = (files) => {
+  const handleFiles = async (files) => {
   const pdfs = Array.from(files || []).filter((file) =>
     file.name.toLowerCase().endsWith(".pdf")
   );
@@ -60,6 +88,37 @@ function Courses() {
     return;
   }
 
+  try {
+    const uploadedCourses = [];
+
+    for (const file of pdfs) {
+      const savedCourse = await uploadCoursePDF(file);
+
+      uploadedCourses.push({
+        id: savedCourse.id,
+        title: savedCourse.title,
+        subjectId: "general",
+        description: "PDF importé dans la base Django.",
+        chapters: ["Résumé du document", "Notions importantes", "Questions possibles"],
+        progress: 0,
+        totalTime: "0h 00",
+        lastStudied: "À l’instant",
+        summary: "Résumé IA en attente.",
+        fileName: savedCourse.file?.split("/").pop() || file.name,
+      });
+    }
+
+    setCourses((prev) => [...uploadedCourses, ...prev]);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  } catch (error) {
+    console.error(error);
+    alert("Erreur pendant l’upload du PDF.");
+  }
+};
+
   const generateSummary = () => {
   if (courses.length === 0) {
     alert("Importe d'abord un PDF.");
@@ -68,28 +127,8 @@ function Courses() {
 
   alert("Résumé IA en cours... Le backend Django fera cette partie.");
 };
-  const newCourses = pdfs.map((file, index) => ({
-    id: Date.now() + index,
-    title: file.name.replace(/\.pdf$/i, ""),
-    subjectId: "general",
-    description: "PDF importé. Le résumé sera généré automatiquement avec l’IA.",
-    chapters: ["Résumé du document", "Notions importantes", "Questions possibles"],
-    progress: 0,
-    totalTime: "0h 00",
-    lastStudied: "À l’instant",
-    summary:
-      "Résumé en attente : Django extraira le texte du PDF, puis Gemini générera le résumé, les chapitres, les flashcards et les quiz.",
-    fileName: file.name,
-  }));
 
-  setCourses((prev) => [...newCourses, ...prev]);
-
-  if (fileInputRef.current) {
-    fileInputRef.current.value = "";
-  }
-};
-
-  const addSubject = () => {
+const addSubject = () => {
     if (!newSubject.trim()) return;
 
     const colors = ["#8B6CF6", "#60A5FA", "#34D399", "#FBBF24", "#F472B6"];

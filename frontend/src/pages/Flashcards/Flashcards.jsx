@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import flashcard from "/src/assets/flashcard.png";
+import { getDecks } from "../../services/api";  
 import {
   ChevronLeft,
   ChevronRight,
@@ -52,6 +53,27 @@ function Flashcards() {
   const [idx, setIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [progress, setProgress] = useState({ hard: 0, good: 0, easy: 0 });
+
+useEffect(() => {
+    async function loadDecks() {
+        try {
+            const data = await getDecks();
+            if(Array.isArray(data) && data.length > 0) {
+                setDecks(data);
+                setDeckId(data[0].id);
+            } else {
+                setDecks(initialDecks);
+                setDeckId(initialDecks[0].id);
+            }
+        } catch (error) {
+            console.error("Erreur lors du chargement des flashcards :", error);
+            setDecks(initialDecks);
+            setDeckId(initialDecks[0].id);
+        }
+    }
+
+    loadDecks();
+}, []);
 
   const filteredDecks = useMemo(
     () =>
