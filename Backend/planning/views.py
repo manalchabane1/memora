@@ -5,34 +5,57 @@ from .models import Availability, RevisionPlan, RevisionSession
 
 from .serializers import (AvailabilitySerializer, RevisionPlanSerializer, RevisionSessionSerializer)
 
-# Create your views here.
-@api_view(['GET'])
-def get_revision_plans(request):
-    plans = RevisionPlan.objects.all().order_by('-created_at')
-    serializer = RevisionPlanSerializer(plans, many=True)
-    return Response(serializer.data)
 
-@api_view(['POST'])
-def create_revision_plan(request):
-    user = User.objects.first()
+@api_view(['GET', 'POST'])
+def revision_plan_create(request):
+    if request.method == "GET":
+        plans = RevisionPlan.objects.all().order_by("-created_at")
+        serializer = RevisionPlanSerializer(plans, many=True)
+        return Response(serializer.data)
+    
+    if request.method == "POST":
+        user = User.objects.first()
+        if user is None:
+            user = User.objects.create_user(username="demo", password="demo1234")
 
-    plan = RevisionPlan.objects.create(
-        title = request.data.get('title'),
-        description = request.data.get('description'),
-        user = user,
-    )
+        serializer = RevisionPlanSerializer(data={**request.data, "user": user.id})
 
-    serializer = RevisionPlanSerializer(plan)
-    return Response(serializer.data, status=201)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=201)
 
-@api_view(["GET"])
-def get_revision_sessions(request):
-    sessions = RevisionSession.objects.all().order_by("-date")
-    serializer = RevisionSessionSerializer(sessions, many=True)
-    return Response(serializer.data)
+        return Response(serializer.errors, status=400)
+    
+@api_view(['GET', 'POST'])
+def availability_list_create(request):
+    if request.method == "GET":
+        availabilities = Availability.objects.all()
+        serializer = AvailabilitySerializer(availabilities, many=True)
+        return Response(serializer.data)
+    
+    if request.method == "POST":
+        user = User.objects.first()
+        if user is None:
+            user = User.objects.create_user(username="demo", password="demo1234")
 
-@api_view(['GET'])
-def get_availabilities(request):
-    availabilities = Availability.objects.all()
-    serializer = AvailabilitySerializer(availabilities, many=True)
-    return Response(serializer.data)
+        serializer = AvailabilitySerializer(data={**request.data, "user": user.id})
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=201)
+
+        return Response(serializer.errors, status=400)
+
+@api_view(['GET', 'POST'])
+def revision_session_list_create(request):
+    if request.method == "GET":
+        sessions = RevisionSession.objects.all().order_by("-date")
+        serializer = RevisionSessionSerializer(sessions, many=True)
+        return Response(serializer.data)
+    
+    if request.method == "POST":
+        serializer = RevisionSessionSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=201)
+        return Response(serializer.errors, status=400)

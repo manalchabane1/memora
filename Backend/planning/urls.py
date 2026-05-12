@@ -1,12 +1,12 @@
 from django.urls import path
-from .views import (get_revision_plans,
-    create_revision_plan,
-    get_revision_sessions,
-    get_availabilities)
+from .views import (
+    revision_plan_create,
+    availability_list_create,
+    revision_session_list_create,
+)
 
 urlpatterns = [
-    path("", get_revision_plans),
-    path("create/", create_revision_plan),
-    path("availabilities/", get_availabilities),
-    path("sessions/", get_revision_sessions),
+    path("", revision_plan_create),
+    path("availabilities/", availability_list_create),
+    path("sessions/", revision_session_list_create),
 ]
