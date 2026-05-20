@@ -26,3 +26,5 @@ node_modules/
 
 # Frontend build
 dist/
+
+media/
