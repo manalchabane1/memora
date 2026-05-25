@@ -1,9 +1,19 @@
 from django.urls import path
-from .views import get_courses, get_decks, upload_course
+from .views import (
+    get_courses,
+    get_decks,
+    upload_course,
+    generate_flashcards_from_course,
+)
 
 urlpatterns = [
-    path("", get_courses),
-    path("upload/", upload_course),
-    path("decks/", get_decks),
-    #path("<int : course_id>/generate-flashcards/", generate_flashcards_from_course),
+    path("", get_courses, name="get_courses"),
+    path("upload/", upload_course, name="upload_course"),
+    path("decks/", get_decks, name="get_decks"),
+
+    path(
+        "<int:course_id>/generate-flashcards/",
+        generate_flashcards_from_course,
+        name="generate_flashcards_from_course"
+    ),
 ]

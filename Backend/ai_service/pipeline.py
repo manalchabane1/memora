@@ -1,6 +1,6 @@
 from .text_cleaning import clean_text
 from .chunking import split_text
-from .gemini_service import generate_flashcards_with_gemini
+from .groq_service import generate_flashcards_with_groq
 
 
 def generate_flashcards_pipeline(text):
@@ -9,8 +9,8 @@ def generate_flashcards_pipeline(text):
 
     all_flashcards = []
 
-    for chunk in chunks:
-        cards = generate_flashcards_with_gemini(chunk)
+    for chunk in chunks[:1]:
+        cards = generate_flashcards_with_groq(chunk)
         all_flashcards.extend(cards)
 
     return all_flashcards

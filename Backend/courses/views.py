@@ -1,11 +1,12 @@
 from django.contrib.auth.models import User
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from .models import CoursePDF, Deck
-from .serializers import CoursePDFSerializer, DeckSerializer
-import fitz 
+
 from .models import CoursePDF, Deck, Flashcard
-#from ai_service.gemini_service import generate_flashcards_with_gemini
+from .serializers import CoursePDFSerializer, DeckSerializer
+
+from ai_service.pdf_extractor import extract_text_from_pdf
+from ai_service.pipeline import generate_flashcards_pipeline
 
 
 @api_view(["GET"])
@@ -13,6 +14,7 @@ def get_courses(request):
     courses = CoursePDF.objects.all().order_by("-uploaded_at")
     serializer = CoursePDFSerializer(courses, many=True)
     return Response(serializer.data)
+
 
 @api_view(["POST"])
 def upload_course(request):
@@ -35,6 +37,7 @@ def upload_course(request):
     serializer = CoursePDFSerializer(course)
     return Response(serializer.data, status=201)
 
+
 @api_view(["GET"])
 def get_decks(request):
     decks = Deck.objects.prefetch_related("flashcards").all()
@@ -49,16 +52,31 @@ def generate_flashcards_from_course(request, course_id):
     except CoursePDF.DoesNotExist:
         return Response({"error": "Cours introuvable"}, status=404)
 
-    text = ""
-
-    with fitz.open(course.file.path) as pdf:
-        for page in pdf:
-            text += page.get_text()
+    try:
+        text = extract_text_from_pdf(course.file.path)
+    except Exception as e:
+        return Response({
+            "error": "Erreur pendant l'extraction du PDF",
+            "details": str(e)
+        }, status=500)
 
     if not text.strip():
-        return Response({"error": "Impossible d'extraire le texte du PDF"}, status=400)
+        return Response({
+            "error": "Impossible d'extraire le texte du PDF"
+        }, status=400)
 
-    #generated_cards = generate_flashcards_with_gemini(text[:12000])
+    try:
+        generated_cards = generate_flashcards_pipeline(text)
+    except Exception as e:
+        return Response({
+            "error": "Erreur pendant la génération des flashcards",
+            "details": str(e)
+        }, status=500)
+
+    if not generated_cards:
+        return Response({
+            "error": "Aucune flashcard générée"
+        }, status=400)
 
     deck = Deck.objects.create(
         title=f"Flashcards - {course.title}",
@@ -76,7 +94,8 @@ def generate_flashcards_from_course(request, course_id):
         )
 
     return Response({
-        "message": "Flashcards générées",
+        "message": "Flashcards générées avec succès",
+        "course_id": course.id,
         "deck_id": deck.id,
         "cards_count": len(generated_cards),
-    })
+    }, status=201)
