@@ -595,11 +595,11 @@ function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGener
 };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <button
-        onClick={onClose}
-        className="absolute inset-0 bg-[#1E293B]/30 backdrop-blur-sm"
-      />
+    <div
+  className="fixed inset-0 z-50 flex justify-end"
+  onClick={onClose}
+>
+    
 
       <div className="relative z-10 hidden lg:block w-[calc(100vw-580px)] p-8">
   <div className="h-full rounded-3xl border border-slate-200 overflow-hidden bg-white shadow-2xl">
@@ -621,7 +621,10 @@ function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGener
   </div>
 </div>
 
-      <aside className="relative z-10 w-full md:w-[65vw] bg-white shadow-2xl overflow-y-auto rounded-l-[36px] overflow-hidden">
+      <aside
+  onClick={(e) => e.stopPropagation()}
+  className="relative z-10 w-full md:w-[65vw] bg-white shadow-2xl overflow-y-auto rounded-l-[36px] overflow-hidden"
+>
         <div
           className="p-8 text-white relative overflow-hidden"
           style={{ background: subject.color }}

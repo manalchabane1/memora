@@ -21,9 +21,7 @@ import mascot from "/src/assets/mascot.png";
 
 
 
-const user = {
-  name: localStorage.getItem("name") || "Étudiant",
-};
+
 
 const sessions = [
   {
@@ -42,6 +40,9 @@ function Dashboard() {
   const [todos, setTodos] = useState([]);
   const [quizzes, setQuizzes] = useState([]);
   const [decks, setDecks] = useState([]);
+  const [userName, setUserName] = useState(
+  localStorage.getItem("name") || "Étudiant"
+);
 
   const todayLabel = new Date().toLocaleDateString("fr-FR", {
     weekday: "long",
@@ -52,6 +53,9 @@ function Dashboard() {
 
   useEffect(() => {
     fetchDashboardData();
+    window.addEventListener("storage", () => {
+  setUserName(localStorage.getItem("name") || "Étudiant");
+});
   }, []);
 
   const fetchDashboardData = async () => {
@@ -96,7 +100,7 @@ function Dashboard() {
           </span>
 
           <h1 className="text-5xl font-extrabold mb-4">
-            Salut {user.name} 👋
+            Salut {userName} 👋
           </h1>
 
           <p className="text-white/90 text-lg leading-relaxed mb-7">
