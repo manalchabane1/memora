@@ -9,12 +9,16 @@ function Login() {
 
   const [isSignup, setIsSignup] = useState(false);
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("email@memora.app");
-  const [password, setPassword] = useState("memora2026");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
+    setSuccess("");
 
     try {
       const endpoint = isSignup
@@ -25,20 +29,31 @@ function Login() {
         `http://127.0.0.1:8000/api/auth/${endpoint}/`,
         {
           username: email,
+          email: email,
           password: password,
           name: name,
         }
       );
 
+
+
+      if (isSignup) {
+        setSuccess("Compte créé ! Vérifie ton email avant de te connecter.");
+        setIsSignup(false);
+        setName("");
+        setEmail("");
+        setPassword("");
+        return;
+      }
       localStorage.setItem("token", res.data.token);
       localStorage.setItem("name", res.data.name);
-
+      
       navigate("/dashboard");
 
     } catch (err) {
       console.error(err);
 
-      alert(
+      setError(
         err.response?.data?.error ||
         "Erreur authentification."
       );
@@ -105,10 +120,22 @@ function Login() {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            
-            {isSignup && (
-              <div>
+          {error && (
+            <div className ="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">
+              {error}
+            </div>
+          )}
+
+          {success && (
+            <div className ="mb-4 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-600">
+              {success}
+            </div>
+          )}
+
+            <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
+
+          {isSignup && (
+            <div>
                 <label className="block text-sm font-bold text-[#1E293B] mb-2">
                   Nom complet
                 </label>
@@ -138,8 +165,9 @@ function Login() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="toi@memora.app"
+                  placeholder="Adresse e-mail"
                   className="w-full h-12 rounded-2xl border border-slate-200 bg-white pl-11 pr-4 text-sm font-medium text-[#1E293B] outline-none transition focus:ring-2 focus:ring-[#8B6CF6]"
+                  autoComplete="off"
                 />
               </div>
             </div>
@@ -167,8 +195,9 @@ function Login() {
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="Mot de passe"
                   className="w-full h-12 rounded-2xl border border-slate-200 bg-white pl-11 pr-12 text-sm font-medium text-[#1E293B] outline-none transition focus:ring-2 focus:ring-[#8B6CF6]"
+                  autoComplete="new-password"
                 />
 
                 <button
@@ -215,5 +244,4 @@ function Login() {
     </div>
   );
 }
-
 export default Login;
