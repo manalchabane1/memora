@@ -8,7 +8,16 @@ function getAuthHeaders() {
 
 async function handleResponse(response, errorMessage) {
   if (!response.ok) {
-    throw new Error(errorMessage);
+    let details = "";
+
+    try {
+      const data = await response.json();
+      details = data.error || data.detail || data.message || JSON.stringify(data);
+    } catch {
+      details = "";
+    }
+
+    throw new Error(details || errorMessage);
   }
 
   return response.json();
@@ -155,4 +164,62 @@ export async function deleteTodoApi(id) {
   });
 
   return handleResponse(response, "Erreur suppression todo");
+}
+
+/* ---------------- PLANNING ---------------- */
+
+export async function getAvailabilities() {
+  const response = await fetch(`${API_URL}/planning/availabilities/`, {
+    headers: {
+      ...getAuthHeaders(),
+    },
+  });
+
+  return handleResponse(response, "Erreur chargement disponibilités");
+}
+
+export async function createAvailability(availability) {
+  const response = await fetch(`${API_URL}/planning/availabilities/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify(availability),
+  });
+
+  return handleResponse(response, "Erreur création disponibilité");
+}
+
+export async function getRevisionPlans() {
+  const response = await fetch(`${API_URL}/planning/`, {
+    headers: {
+      ...getAuthHeaders(),
+    },
+  });
+
+  return handleResponse(response, "Erreur chargement plannings");
+}
+
+export async function getRevisionSessions() {
+  const response = await fetch(`${API_URL}/planning/sessions/`, {
+    headers: {
+      ...getAuthHeaders(),
+    },
+  });
+
+  return handleResponse(response, "Erreur chargement séances");
+}
+
+export async function generateAiPlanning(data) {
+  const response = await fetch(`${API_URL}/planning/generate-ai/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify(data),
+  });
+
+  return handleResponse(response, "Erreur génération planning IA");
 }

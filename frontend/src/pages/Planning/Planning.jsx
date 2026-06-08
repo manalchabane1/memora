@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -10,7 +10,13 @@ import {
   X,
   Pencil,
   MapPin,
+  Sparkles,
 } from "lucide-react";
+
+import {
+  getRevisionSessions,
+  generateAiPlanning,
+} from "../../services/api";
 
 const HOURS = Array.from({ length: 18 }).map((_, i) => 6 + i);
 const DAYS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
@@ -41,28 +47,48 @@ function getDayIndexFromDate(dateString) {
   return (d.getDay() + 6) % 7;
 }
 
-const currentMonday = getMonday(new Date());
+function getHour(value, fallback = 9) {
+  if (!value) return fallback;
+  return Number(String(value).split(":")[0]);
+}
 
-const initialEvents = [
-  {
-    id: 1,
-    title: "Révision cours",
-    date: formatDateInput(currentMonday),
-    startHour: 9,
-    endHour: 11,
-    location: "Bibliothèque",
-    description: "Revoir le chapitre et faire quelques exercices.",
+function sessionToEvent(session) {
+  const startHour = getHour(session.start_time, 9);
+  const endHour = getHour(session.end_time, startHour + 1);
+
+  return {
+    id: session.id || session.session_id || Date.now(),
+    title: session.objective || session.title || "Séance de révision",
+    date: session.date,
+    startHour,
+    endHour,
+    location: "Planning IA",
+    description: session.session_type || session.description || "Révision",
     color: "#8B6CF6",
-  },
-];
+  };
+}
 
 function Planning() {
-  const [events, setEvents] = useState(initialEvents);
+  const [events, setEvents] = useState([]);
   const [weekOffset, setWeekOffset] = useState(0);
   const [draggedId, setDraggedId] = useState(null);
   const [hoverCell, setHoverCell] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
+  const [loadingAi, setLoadingAi] = useState(false);
+
+  useEffect(() => {
+    async function loadSessions() {
+      try {
+        const sessions = await getRevisionSessions();
+        setEvents(sessions.map(sessionToEvent));
+      } catch (error) {
+        console.error("Erreur chargement planning:", error);
+      }
+    }
+
+    loadSessions();
+  }, []);
 
   const weekInfo = useMemo(() => {
     const monday = getMonday(new Date(), weekOffset);
@@ -120,6 +146,45 @@ function Planning() {
     setEditingEvent(null);
   };
 
+  const handleGenerateAiPlanning = async () => {
+    const deckId = prompt("ID du deck à réviser ?", "1");
+    const examDate = prompt("Date de l'examen ? format YYYY-MM-DD", "2026-06-20");
+    const priority = prompt("Priorité ? low / medium / high", "high");
+
+    if (!deckId || !examDate) return;
+
+    setLoadingAi(true);
+
+    try {
+      console.log({
+        deck_id: Number(deckId),
+        exam_date: examDate,
+        priority,
+      });
+
+      const result = await generateAiPlanning({
+        deck_id: Number(deckId),
+        exam_date: examDate,
+        priority,
+      });
+
+      console.log("AI planning result:", result);
+
+      const newEvents = Array.isArray(result.sessions)
+        ? result.sessions.map(sessionToEvent)
+        : [];
+
+      setEvents((prev) => [...prev, ...newEvents]);
+
+      alert(result.message || "Planning IA généré avec succès !");
+    } catch (error) {
+      console.error("Erreur génération planning IA:", error);
+      alert(error.message);
+    } finally {
+      setLoadingAi(false);
+    }
+  };
+
   const onDrop = (dayIndex, hour) => {
     if (!draggedId) return;
 
@@ -162,7 +227,7 @@ function Planning() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <div className="h-12 px-4 rounded-2xl bg-white border border-slate-200 flex items-center gap-3">
             <button onClick={() => setWeekOffset((v) => v - 1)}>
               <ChevronLeft className="text-slate-500" size={20} />
@@ -184,6 +249,15 @@ function Planning() {
           >
             <Plus size={20} />
             Nouvel événement
+          </button>
+
+          <button
+            onClick={handleGenerateAiPlanning}
+            disabled={loadingAi}
+            className="h-12 px-5 rounded-2xl bg-[#34D399] text-white font-bold flex items-center gap-2 hover:bg-[#10B981] disabled:opacity-60"
+          >
+            <Sparkles size={20} />
+            {loadingAi ? "Génération..." : "Planning IA"}
           </button>
         </div>
       </header>

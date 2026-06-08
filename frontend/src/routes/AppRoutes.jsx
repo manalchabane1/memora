@@ -2,7 +2,7 @@ import { Routes, Route } from "react-router-dom";
 
 import Login from "../pages/Login/Login";
 import Dashboard from "../pages/Dashboard/Dashboard";
-import Courses from "../pages/Courses/Courses";
+import Courses from "../pages/courses/Courses";
 import Flashcards from "../pages/Flashcards/Flashcards";
 import Quiz from "../pages/Quiz/Quiz";
 import Planning from "../pages/Planning/Planning";
