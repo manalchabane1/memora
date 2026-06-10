@@ -21,6 +21,37 @@ import {
 } from "lucide-react";
 
 import logo from "/src/assets/logo.png";
+import {
+  changePassword,
+  getProfile,
+  logoutApi,
+  updateProfile,
+} from "../services/api";
+import { getDisplayName, getInitials, storeProfile } from "../utils/profile";
+
+function localDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function updateDailyStreak() {
+  const today = localDateKey(new Date());
+  const lastVisit = localStorage.getItem("lastVisitDate");
+  const currentStreak = Number(localStorage.getItem("streak") || 0);
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const nextStreak = lastVisit === today
+    ? Math.max(currentStreak, 1)
+    : lastVisit === localDateKey(yesterday)
+      ? currentStreak + 1
+      : 1;
+
+  localStorage.setItem("lastVisitDate", today);
+  localStorage.setItem("streak", String(nextStreak));
+  return nextStreak;
+}
 
 function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -34,48 +65,43 @@ function AppLayout() {
     localStorage.getItem("email") || ""
   );
   const [profileSaved, setProfileSaved] = useState(false);
-  const [streak, setStreak] = useState(1);
+  const [profileError, setProfileError] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [streak] = useState(updateDailyStreak);
   const navigate = useNavigate();
+  const displayName = getDisplayName(profileName, profileEmail);
+  const initials = getInitials(profileName, profileEmail);
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await logoutApi();
+    } catch {
+      // Local logout must still work if the API is unavailable.
+    }
     localStorage.removeItem("token");
     localStorage.removeItem("name");
+    localStorage.removeItem("email");
 
     navigate("/");
   };
 
+  useEffect(() => {
+    const handleAuthExpired = () => navigate("/", { replace: true });
+    window.addEventListener("auth-expired", handleAuthExpired);
+    return () => window.removeEventListener("auth-expired", handleAuthExpired);
+  }, [navigate]);
 
   useEffect(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    const lastVisit = localStorage.getItem("lastVisitDate");
-    const currentStreak = Number(localStorage.getItem("streak") || 0);
-
-    if (!lastVisit) {
-      localStorage.setItem("lastVisitDate", today);
-      localStorage.setItem("streak", "1");
-      setStreak(1);
-      return;
-    }
-
-    if (lastVisit === today) {
-      setStreak(currentStreak);
-      return;
-    }
-
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().slice(0, 10);
-
-    if (lastVisit === yesterdayStr) {
-      const newStreak = currentStreak + 1;
-      localStorage.setItem("streak", String(newStreak));
-      localStorage.setItem("lastVisitDate", today);
-      setStreak(newStreak);
-    } else {
-      localStorage.setItem("streak", "1");
-      localStorage.setItem("lastVisitDate", today);
-      setStreak(1);
-    }
+    getProfile()
+      .then((profile) => {
+        setProfileName(profile.name || "");
+        setProfileEmail(profile.email || "");
+        storeProfile(profile);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -168,7 +194,7 @@ function AppLayout() {
                 {[1, 2, 3, 4, 5, 6, 7].map((item) => (
                   <div
                     key={item}
-                    className={`h-2 flex-1 rounded-full ${item <= 5
+                    className={`h-2 flex-1 rounded-full ${item <= Math.min(streak, 7)
                       ? "bg-yellow-400"
                       : darkMode
                         ? "bg-yellow-500/20"
@@ -195,13 +221,19 @@ function AppLayout() {
 
           <div className={`border-t pt-5 ${darkMode ? "border-slate-800" : "border-slate-100"}`}>
             <div className="flex items-center gap-3 mb-5">
-              <div className="w-11 h-11 rounded-full bg-[#8B6CF6] text-white flex items-center justify-center font-bold">
-                FC
+              <div
+                title={`Initiales de ${displayName}`}
+                className="w-11 h-11 shrink-0 rounded-full bg-[#8B6CF6] text-white flex items-center justify-center font-bold"
+              >
+                {initials}
               </div>
 
-              <div className="flex-1">
-                <h3 className={`font-bold text-sm ${darkMode ? "text-white" : "text-[#1E293B]"}`}>
-                  {localStorage.getItem("name") || "Étudiant"}
+              <div className="flex-1 min-w-0">
+                <h3
+                  title={displayName}
+                  className={`font-bold text-sm truncate ${darkMode ? "text-white" : "text-[#1E293B]"}`}
+                >
+                  {displayName}
                 </h3>
               </div>
 
@@ -263,6 +295,9 @@ function AppLayout() {
                     <input
                       value={profileName}
                       onChange={(e) => setProfileName(e.target.value)}
+                      placeholder="Prénom et nom"
+                      autoComplete="name"
+                      maxLength={150}
                       className={`mt-2 w-full h-12 rounded-2xl border px-4 outline-none ${darkMode ? "bg-slate-950 border-slate-700" : "bg-white border-slate-200"
                         }`}
                     />
@@ -271,27 +306,36 @@ function AppLayout() {
                   <div>
                     <label className="text-sm font-bold text-slate-400">Email</label>
                     <input
+                      type="email"
                       value={profileEmail}
                       onChange={(e) => setProfileEmail(e.target.value)}
+                      placeholder="Adresse e-mail"
+                      autoComplete="email"
                       className={`mt-2 w-full h-12 rounded-2xl border px-4 outline-none ${darkMode ? "bg-slate-950 border-slate-700" : "bg-white border-slate-200"
                         }`}
                     />
                     <button
-  onClick={() => {
-    localStorage.setItem("name", profileName);
-    localStorage.setItem("email", profileEmail);
-    window.dispatchEvent(new Event("storage"));
-
-    setProfileSaved(true);
-
-    setTimeout(() => {
-      setProfileSaved(false);
-    }, 2000);
-  }}
-  className="mt-4 h-12 px-6 rounded-2xl bg-[#8B6CF6] text-white font-bold hover:bg-[#7C3AED] active:scale-95 transition"
->
-  {profileSaved ? "Profil sauvegardé ✓" : "Sauvegarder le profil"}
-</button>
+                      onClick={async () => {
+                        setProfileError("");
+                        try {
+                          const profile = await updateProfile({
+                            name: profileName,
+                            email: profileEmail,
+                          });
+                          setProfileName(profile.name);
+                          setProfileEmail(profile.email);
+                          storeProfile(profile);
+                          setProfileSaved(true);
+                          setTimeout(() => setProfileSaved(false), 2000);
+                        } catch (error) {
+                          setProfileError(error.message);
+                        }
+                      }}
+                      className="mt-4 h-12 px-6 rounded-2xl bg-[#8B6CF6] text-white font-bold hover:bg-[#7C3AED] active:scale-95 transition"
+                    >
+                      {profileSaved ? "Profil sauvegardé" : "Sauvegarder le profil"}
+                    </button>
+                    {profileError && <p className="mt-2 text-sm text-red-500">{profileError}</p>}
                   </div>
                 </div>
               </section>
@@ -305,14 +349,37 @@ function AppLayout() {
                 </div>
 
                 <div className="grid gap-3">
-                  <input type="password" placeholder="Mot de passe actuel" className="h-12 rounded-2xl border border-slate-200 px-4 outline-none" />
-                  <input type="password" placeholder="Nouveau mot de passe" className="h-12 rounded-2xl border border-slate-200 px-4 outline-none" />
-                  <input type="password" placeholder="Confirmer le nouveau mot de passe" className="h-12 rounded-2xl border border-slate-200 px-4 outline-none" />
+                  <input value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} type="password" placeholder="Mot de passe actuel" className="h-12 rounded-2xl border border-slate-200 px-4 outline-none" />
+                  <input value={newPassword} onChange={(e) => setNewPassword(e.target.value)} type="password" placeholder="Nouveau mot de passe" className="h-12 rounded-2xl border border-slate-200 px-4 outline-none" />
+                  <input value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} type="password" placeholder="Confirmer le nouveau mot de passe" className="h-12 rounded-2xl border border-slate-200 px-4 outline-none" />
 
-                  <button className="h-12 rounded-2xl bg-blue-500 text-white font-bold flex items-center justify-center gap-2">
+                  <button
+                    onClick={async () => {
+                      setPasswordMessage("");
+                      if (newPassword !== confirmPassword) {
+                        setPasswordMessage("Les mots de passe ne correspondent pas.");
+                        return;
+                      }
+                      try {
+                        const result = await changePassword({
+                          current_password: currentPassword,
+                          new_password: newPassword,
+                        });
+                        setPasswordMessage(result.message);
+                        setCurrentPassword("");
+                        setNewPassword("");
+                        setConfirmPassword("");
+                        setTimeout(logout, 1200);
+                      } catch (error) {
+                        setPasswordMessage(error.message);
+                      }
+                    }}
+                    className="h-12 rounded-2xl bg-blue-500 text-white font-bold flex items-center justify-center gap-2"
+                  >
                     <Save size={18} />
                     Changer le mot de passe
                   </button>
+                  {passwordMessage && <p className="text-sm text-slate-500">{passwordMessage}</p>}
                 </div>
               </section>
 

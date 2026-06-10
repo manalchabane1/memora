@@ -1,7 +1,7 @@
 import {useState} from "react";
 import {Eye,EyeOff,Lock} from "lucide-react";
 import { useParams, Link } from "react-router-dom";
-import axios from "axios";
+import { confirmPasswordReset } from "../../services/api";
 
 function ResetPassword() {
     const { uid, token } = useParams();
@@ -23,19 +23,13 @@ function ResetPassword() {
         }
 
         try {
-            const res = await axios.post(
-                `http://127.0.0.1:8000/api/auth/password-reset-confirm/${uid}/${token}/`,
-        {
-          password: password,
-        }
-      );
-    setSuccess(res.data.message || "Mot de passe réinitialisé avec succès !");
+            const result = await confirmPasswordReset(uid, token, password);
+    setSuccess(result.message || "Mot de passe réinitialisé avec succès !");
     setPassword("");
     setConfirmPassword("");
         } catch (err) {
-            console.log("RESET ERROR =", err.reponses?.data);
             setError(
-                err.response?.data?.error ||
+                err.message ||
                 "Erreur lors de la réinitialisation du mot de passe."
             );
         } };
@@ -66,6 +60,7 @@ function ResetPassword() {
                     placeholder="Nouveau mot de passe"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    required
                     className="w-full h-12 rounded-2xl border border-slate-200 bg-white pl-11 pr-4 text-sm font-medium text-[#1E293B] outline-none transition focus:ring-2 focus:ring-[#8B6CF6]"
                      />
                     <button
@@ -84,6 +79,7 @@ function ResetPassword() {
                     placeholder="Confirmer le mot de passe"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
                     className="w-full h-12 rounded-2xl border border-slate-200 bg-white pl-11 pr-4 text-sm font-medium text-[#1E293B] outline-none transition focus:ring-2 focus:ring-[#8B6CF6]"
                      />
                     <button

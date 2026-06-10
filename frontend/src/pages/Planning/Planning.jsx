@@ -14,11 +14,20 @@ import {
 } from "lucide-react";
 
 import {
+  createAvailability,
+  createRevisionPlan,
+  createRevisionSession,
+  deleteAvailability,
+  deleteRevisionSession,
+  getAvailabilities,
+  getRevisionPlans,
   getRevisionSessions,
   generateAiPlanning,
+  updateRevisionSession,
+  getDecks,
 } from "../../services/api";
 
-const HOURS = Array.from({ length: 18 }).map((_, i) => 6 + i);
+const HOURS = Array.from({ length: 24 }).map((_, i) => i);
 const DAYS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
 const COLORS = ["#8B6CF6", "#60A5FA", "#34D399", "#FBBF24", "#F472B6"];
 
@@ -49,7 +58,14 @@ function getDayIndexFromDate(dateString) {
 
 function getHour(value, fallback = 9) {
   if (!value) return fallback;
-  return Number(String(value).split(":")[0]);
+  const [hours, minutes = "0"] = String(value).split(":");
+  return Number(hours) + Number(minutes) / 60;
+}
+
+function hourToTime(value) {
+  const hours = Math.floor(value);
+  const minutes = Math.round((value - hours) * 60);
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
 function sessionToEvent(session) {
@@ -58,13 +74,16 @@ function sessionToEvent(session) {
 
   return {
     id: session.id || session.session_id || Date.now(),
-    title: session.objective || session.title || "Séance de révision",
+    title: session.title || session.objective || "Séance de révision",
     date: session.date,
     startHour,
     endHour,
-    location: "Planning IA",
-    description: session.session_type || session.description || "Révision",
-    color: "#8B6CF6",
+    location: session.location || (session.objective ? "Planning IA" : ""),
+    description: session.description || session.session_type || "Révision",
+    color: session.color || "#8B6CF6",
+    revisionPlan: session.revisionPlan,
+    deck: session.deck,
+    status: session.status || "planned",
   };
 }
 
@@ -76,18 +95,36 @@ function Planning() {
   const [showModal, setShowModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
   const [loadingAi, setLoadingAi] = useState(false);
+  const [decks, setDecks] = useState([]);
+  const [plans, setPlans] = useState([]);
+  const [availabilities, setAvailabilities] = useState([]);
+  const [availabilityDay, setAvailabilityDay] = useState("Lundi");
+  const [availabilityStart, setAvailabilityStart] = useState("18:00");
+  const [availabilityEnd, setAvailabilityEnd] = useState("19:00");
+  const [aiDeckId, setAiDeckId] = useState("");
+  const [aiExamDate, setAiExamDate] = useState("");
+  const [aiPriority, setAiPriority] = useState("medium");
 
   useEffect(() => {
-    async function loadSessions() {
+    async function loadPlanningData() {
       try {
-        const sessions = await getRevisionSessions();
+        const [sessions, loadedDecks, loadedPlans, loadedAvailabilities] = await Promise.all([
+          getRevisionSessions(),
+          getDecks(),
+          getRevisionPlans(),
+          getAvailabilities(),
+        ]);
         setEvents(sessions.map(sessionToEvent));
+        setDecks(loadedDecks);
+        setPlans(loadedPlans);
+        setAvailabilities(loadedAvailabilities);
+        setAiDeckId(loadedDecks[0]?.id ? String(loadedDecks[0].id) : "");
       } catch (error) {
         console.error("Erreur chargement planning:", error);
       }
     }
 
-    loadSessions();
+    loadPlanningData();
   }, []);
 
   const weekInfo = useMemo(() => {
@@ -125,56 +162,77 @@ function Planning() {
     setShowModal(true);
   };
 
-  const saveEvent = (data) => {
-    if (editingEvent) {
-      setEvents((prev) =>
-        prev.map((event) =>
-          event.id === editingEvent.id ? { ...event, ...data } : event
-        )
-      );
-    } else {
-      setEvents((prev) => [...prev, { id: Date.now(), ...data }]);
-    }
+  const saveEvent = async (data) => {
+    try {
+      let revisionPlan = data.revisionPlan;
+      if (!revisionPlan) {
+        const plan = await createRevisionPlan({
+          title: "Planning personnel",
+          description: "Événements ajoutés manuellement",
+        });
+        setPlans((prev) => [plan, ...prev]);
+        revisionPlan = plan.id;
+      }
 
-    setShowModal(false);
-    setEditingEvent(null);
+      const payload = {
+        title: data.title,
+        date: data.date,
+        start_time: hourToTime(data.startHour),
+        end_time: hourToTime(data.endHour),
+        location: data.location,
+        description: data.description,
+        color: data.color,
+        revisionPlan,
+        deck: data.deck,
+        status: data.status || "planned",
+      };
+
+      if (editingEvent) {
+        const saved = await updateRevisionSession(editingEvent.id, payload);
+        setEvents((prev) =>
+          prev.map((event) => (event.id === editingEvent.id ? sessionToEvent(saved) : event))
+        );
+      } else {
+        const saved = await createRevisionSession(payload);
+        setEvents((prev) => [...prev, sessionToEvent(saved)]);
+      }
+
+      setShowModal(false);
+      setEditingEvent(null);
+    } catch (error) {
+      alert(error.message);
+    }
   };
 
-  const deleteEvent = (id) => {
-    setEvents((prev) => prev.filter((event) => event.id !== id));
-    setShowModal(false);
-    setEditingEvent(null);
+  const deleteEvent = async (id) => {
+    try {
+      await deleteRevisionSession(id);
+      setEvents((prev) => prev.filter((event) => event.id !== id));
+      setShowModal(false);
+      setEditingEvent(null);
+    } catch (error) {
+      alert(error.message);
+    }
   };
 
   const handleGenerateAiPlanning = async () => {
-    const deckId = prompt("ID du deck à réviser ?", "1");
-    const examDate = prompt("Date de l'examen ? format YYYY-MM-DD", "2026-06-20");
-    const priority = prompt("Priorité ? low / medium / high", "high");
-
-    if (!deckId || !examDate) return;
+    if (!aiDeckId || !aiExamDate) return alert("Choisis un deck et une date d'examen.");
 
     setLoadingAi(true);
 
     try {
-      console.log({
-        deck_id: Number(deckId),
-        exam_date: examDate,
-        priority,
-      });
-
       const result = await generateAiPlanning({
-        deck_id: Number(deckId),
-        exam_date: examDate,
-        priority,
+        deck_id: Number(aiDeckId),
+        exam_date: aiExamDate,
+        priority: aiPriority,
       });
-
-      console.log("AI planning result:", result);
 
       const newEvents = Array.isArray(result.sessions)
         ? result.sessions.map(sessionToEvent)
         : [];
 
       setEvents((prev) => [...prev, ...newEvents]);
+      setPlans(await getRevisionPlans());
 
       alert(result.message || "Planning IA généré avec succès !");
     } catch (error) {
@@ -185,29 +243,54 @@ function Planning() {
     }
   };
 
-  const onDrop = (dayIndex, hour) => {
+  const onDrop = async (dayIndex, hour) => {
     if (!draggedId) return;
 
     const newDate = new Date(weekInfo.monday);
     newDate.setDate(weekInfo.monday.getDate() + dayIndex);
 
-    setEvents((prev) =>
-      prev.map((event) => {
-        if (event.id !== draggedId) return event;
+    const event = events.find((item) => item.id === draggedId);
+    if (!event) return;
+    const duration = event.endHour - event.startHour;
+    const targetHour = Math.max(0, Math.min(hour, 23 - duration));
 
-        const duration = event.endHour - event.startHour;
+    try {
+      const saved = await updateRevisionSession(event.id, {
+        date: formatDateInput(newDate),
+        start_time: hourToTime(targetHour),
+        end_time: hourToTime(targetHour + duration),
+      });
+      setEvents((prev) =>
+        prev.map((item) => (item.id === event.id ? sessionToEvent(saved) : item))
+      );
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setDraggedId(null);
+      setHoverCell(null);
+    }
+  };
 
-        return {
-          ...event,
-          date: formatDateInput(newDate),
-          startHour: hour,
-          endHour: hour + duration,
-        };
-      })
-    );
+  const addAvailability = async () => {
+    try {
+      const availability = await createAvailability({
+        day: availabilityDay,
+        start_time: availabilityStart,
+        end_time: availabilityEnd,
+      });
+      setAvailabilities((prev) => [...prev, availability]);
+    } catch (error) {
+      alert(error.message);
+    }
+  };
 
-    setDraggedId(null);
-    setHoverCell(null);
+  const removeAvailability = async (id) => {
+    try {
+      await deleteAvailability(id);
+      setAvailabilities((prev) => prev.filter((item) => item.id !== id));
+    } catch (error) {
+      alert(error.message);
+    }
   };
 
   return (
@@ -262,6 +345,49 @@ function Planning() {
         </div>
       </header>
 
+      <section className="grid xl:grid-cols-2 gap-4 mb-8">
+        <div className="bg-white rounded-3xl border border-slate-100 p-5 shadow-sm">
+          <h2 className="font-extrabold text-lg">Disponibilités pour l’IA</h2>
+          <div className="grid sm:grid-cols-[1fr_1fr_1fr_auto] gap-2 mt-4">
+            <select value={availabilityDay} onChange={(e) => setAvailabilityDay(e.target.value)} className="h-11 rounded-xl border border-slate-200 px-3">
+              {DAYS.map((day) => <option key={day}>{day}</option>)}
+            </select>
+            <input type="time" value={availabilityStart} onChange={(e) => setAvailabilityStart(e.target.value)} className="h-11 rounded-xl border border-slate-200 px-3" />
+            <input type="time" value={availabilityEnd} onChange={(e) => setAvailabilityEnd(e.target.value)} className="h-11 rounded-xl border border-slate-200 px-3" />
+            <button onClick={addAvailability} className="h-11 px-4 rounded-xl bg-[#1E293B] text-white font-bold">Ajouter</button>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-4">
+            {availabilities.map((availability) => (
+              <button
+                key={availability.id}
+                onClick={() => removeAvailability(availability.id)}
+                className="px-3 py-2 rounded-xl bg-[#8B6CF6]/10 text-[#8B6CF6] text-sm font-bold flex items-center gap-2"
+                title="Supprimer"
+              >
+                {availability.day} {availability.start_time.slice(0, 5)}–{availability.end_time.slice(0, 5)}
+                <X size={14} />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-3xl border border-slate-100 p-5 shadow-sm">
+          <h2 className="font-extrabold text-lg">Génération du planning IA</h2>
+          <div className="grid sm:grid-cols-3 gap-2 mt-4">
+            <select value={aiDeckId} onChange={(e) => setAiDeckId(e.target.value)} className="h-11 rounded-xl border border-slate-200 px-3">
+              <option value="">Choisir un deck</option>
+              {decks.map((deck) => <option key={deck.id} value={deck.id}>{deck.title}</option>)}
+            </select>
+            <input type="date" value={aiExamDate} min={formatDateInput(new Date())} onChange={(e) => setAiExamDate(e.target.value)} className="h-11 rounded-xl border border-slate-200 px-3" />
+            <select value={aiPriority} onChange={(e) => setAiPriority(e.target.value)} className="h-11 rounded-xl border border-slate-200 px-3">
+              <option value="low">Priorité faible</option>
+              <option value="medium">Priorité moyenne</option>
+              <option value="high">Priorité haute</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
       <section className="grid md:grid-cols-3 gap-4 max-w-[700px] mb-8">
         <MiniStat value={visibleEvents.length} label="Événements" color="#8B6CF6" />
         <MiniStat value={`${totalHours}h`} label="Heures planifiées" color="#60A5FA" />
@@ -301,7 +427,7 @@ function Planning() {
                 const cellEvents = visibleEvents.filter(
                   (event) =>
                     getDayIndexFromDate(event.date) === dayIndex &&
-                    event.startHour === hour
+                    Math.floor(event.startHour) === hour
                 );
 
                 const isHover =
@@ -354,6 +480,8 @@ function Planning() {
           }}
           onSave={saveEvent}
           onDelete={deleteEvent}
+          decks={decks}
+          plans={plans}
         />
       )}
     </div>
@@ -389,7 +517,7 @@ function EventBlock({ event, onDragStart, onDragEnd, onEdit, onDelete }) {
 
           <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
             <Clock3 size={13} />
-            {event.startHour}h–{event.endHour}h
+            {hourToTime(event.startHour)}–{hourToTime(event.endHour)}
           </p>
 
           {event.location && (
@@ -426,7 +554,7 @@ function EventBlock({ event, onDragStart, onDragEnd, onEdit, onDelete }) {
   );
 }
 
-function EventModal({ initialData, defaultDate, onClose, onSave, onDelete }) {
+function EventModal({ initialData, defaultDate, onClose, onSave, onDelete, decks, plans }) {
   const isEdit = Boolean(initialData);
 
   const [title, setTitle] = useState(initialData?.title || "");
@@ -436,11 +564,14 @@ function EventModal({ initialData, defaultDate, onClose, onSave, onDelete }) {
   const [location, setLocation] = useState(initialData?.location || "");
   const [description, setDescription] = useState(initialData?.description || "");
   const [color, setColor] = useState(initialData?.color || "#8B6CF6");
+  const [deck, setDeck] = useState(initialData?.deck || decks[0]?.id || "");
+  const [revisionPlan, setRevisionPlan] = useState(initialData?.revisionPlan || plans[0]?.id || "");
 
   const submit = (e) => {
     e.preventDefault();
 
     if (!title.trim()) return alert("Ajoute un titre.");
+    if (!deck) return alert("Choisis un deck.");
     if (endHour <= startHour) {
       alert("L’heure de fin doit être après l’heure de début.");
       return;
@@ -454,6 +585,9 @@ function EventModal({ initialData, defaultDate, onClose, onSave, onDelete }) {
       location,
       description,
       color,
+      deck: Number(deck),
+      revisionPlan: revisionPlan ? Number(revisionPlan) : null,
+      status: initialData?.status || "planned",
     });
   };
 
@@ -506,30 +640,35 @@ function EventModal({ initialData, defaultDate, onClose, onSave, onDelete }) {
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Heure début">
-              <select
-                value={startHour}
-                onChange={(e) => setStartHour(Number(e.target.value))}
+              <input
+                type="time"
+                value={hourToTime(startHour)}
+                onChange={(e) => setStartHour(getHour(e.target.value))}
                 className="w-full h-12 rounded-2xl border border-slate-200 px-4 outline-none focus:ring-2 focus:ring-[#8B6CF6] focus:border-transparent"
-              >
-                {HOURS.map((h) => (
-                  <option key={h} value={h}>
-                    {h}h
-                  </option>
-                ))}
-              </select>
+              />
             </Field>
 
             <Field label="Heure fin">
-              <select
-                value={endHour}
-                onChange={(e) => setEndHour(Number(e.target.value))}
+              <input
+                type="time"
+                value={hourToTime(endHour)}
+                onChange={(e) => setEndHour(getHour(e.target.value))}
                 className="w-full h-12 rounded-2xl border border-slate-200 px-4 outline-none focus:ring-2 focus:ring-[#8B6CF6] focus:border-transparent"
-              >
-                {HOURS.map((h) => (
-                  <option key={h} value={h}>
-                    {h}h
-                  </option>
-                ))}
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Deck">
+              <select value={deck} onChange={(e) => setDeck(e.target.value)} className="w-full h-12 rounded-2xl border border-slate-200 px-4">
+                <option value="">Choisir un deck</option>
+                {decks.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+              </select>
+            </Field>
+            <Field label="Planning">
+              <select value={revisionPlan} onChange={(e) => setRevisionPlan(e.target.value)} className="w-full h-12 rounded-2xl border border-slate-200 px-4">
+                <option value="">Planning personnel</option>
+                {plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.title}</option>)}
               </select>
             </Field>
           </div>

@@ -5,11 +5,11 @@ from django.contrib.auth.models import User
 # Create your models here.
 class CoursePDF(models.Model):
     title = models.CharField(max_length=255)
+    subject = models.CharField(max_length=100, default="Général")
     file = models.FileField(upload_to='course_pdfs/')
-    summary = models.TextField(blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
     user = models.ForeignKey(User, on_delete = models.CASCADE, related_name='course_pdfs')
-    summary =  models.TextField(blank=True , default="")
+    summary = models.TextField(blank=True, default="")
 
 
     def __str__(self):

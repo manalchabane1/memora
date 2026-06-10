@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import { verifyEmail } from "../../services/api";
 
 export default function VerifyEmail() {
   const { uid, token } = useParams();
@@ -7,15 +8,14 @@ export default function VerifyEmail() {
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    fetch(`http://127.0.0.1:8000/api/accounts/verify-email/${uid}/${token}/`)
-      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
-        setSuccess(ok);
-        setMessage(data.message || data.error || "Erreur de vérification");
+    verifyEmail(uid, token)
+      .then((data) => {
+        setSuccess(true);
+        setMessage(data.message || "Email vérifié.");
       })
-      .catch(() => {
+      .catch((error) => {
         setSuccess(false);
-        setMessage("Impossible de vérifier le compte.");
+        setMessage(error.message);
       });
   }, [uid, token]);
 

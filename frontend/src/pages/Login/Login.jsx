@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mail, Lock, Eye, EyeOff, Sparkles, ArrowRight, User } from "lucide-react";
 import memiImage from "/src/assets/mascot.png";
-import axios from "axios";
+import { loginAccount, registerAccount, requestPasswordReset } from "../../services/api";
+import { storeProfile } from "../../utils/profile";
 
 function Login() {
   const navigate = useNavigate();
@@ -14,6 +15,8 @@ function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -25,15 +28,14 @@ function Login() {
         ? "register"
         : "login";
 
-      const res = await axios.post(
-        `http://127.0.0.1:8000/api/auth/${endpoint}/`,
-        {
+      const result = await (endpoint === "register"
+        ? registerAccount({
           username: email,
           email: email,
           password: password,
           name: name,
-        }
-      );
+        })
+        : loginAccount({ username: email, password }));
 
 
 
@@ -41,12 +43,11 @@ function Login() {
         setSuccess("Compte créé ! Vérifie ton email avant de te connecter.");
         setIsSignup(false);
         setName("");
-        setEmail("");
         setPassword("");
         return;
       }
-      localStorage.setItem("token", res.data.token);
-      localStorage.setItem("name", res.data.name);
+      localStorage.setItem("token", result.token);
+      storeProfile({ name: result.name || "", email: result.email || email });
       
       navigate("/dashboard");
 
@@ -54,9 +55,26 @@ function Login() {
       console.error(err);
 
       setError(
-        err.response?.data?.error ||
+        err.message ||
         "Erreur authentification."
       );
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const targetEmail = resetEmail || email;
+    if (!targetEmail) {
+      setError("Entre ton adresse e-mail pour recevoir le lien.");
+      return;
+    }
+
+    setError("");
+    try {
+      const result = await requestPasswordReset(targetEmail);
+      setSuccess(result.message);
+      setResetOpen(false);
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -146,7 +164,10 @@ function Login() {
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="Faiza"
+                    placeholder="Prénom et nom"
+                    autoComplete="name"
+                    maxLength={150}
+                    required
                     className="w-full h-12 rounded-2xl border border-slate-200 bg-white pl-11 pr-4 text-sm font-medium text-[#1E293B] outline-none transition focus:ring-2 focus:ring-[#8B6CF6]"
                   />
                 </div>
@@ -167,7 +188,8 @@ function Login() {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Adresse e-mail"
                   className="w-full h-12 rounded-2xl border border-slate-200 bg-white pl-11 pr-4 text-sm font-medium text-[#1E293B] outline-none transition focus:ring-2 focus:ring-[#8B6CF6]"
-                  autoComplete="off"
+                  autoComplete="email"
+                  required
                 />
               </div>
             </div>
@@ -181,6 +203,7 @@ function Login() {
                 {!isSignup && (
                   <button
                     type="button"
+                    onClick={() => setResetOpen((open) => !open)}
                     className="text-sm font-bold text-[#8B6CF6] hover:underline"
                   >
                     Oublié ?
@@ -197,7 +220,8 @@ function Login() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Mot de passe"
                   className="w-full h-12 rounded-2xl border border-slate-200 bg-white pl-11 pr-12 text-sm font-medium text-[#1E293B] outline-none transition focus:ring-2 focus:ring-[#8B6CF6]"
-                  autoComplete="new-password"
+                  autoComplete={isSignup ? "new-password" : "current-password"}
+                  required
                 />
 
                 <button
@@ -209,6 +233,25 @@ function Login() {
                 </button>
               </div>
             </div>
+
+            {!isSignup && resetOpen && (
+              <div className="rounded-2xl border border-[#8B6CF6]/20 bg-[#8B6CF6]/5 p-3">
+                <input
+                  type="email"
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  placeholder={email || "Adresse e-mail"}
+                  className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  className="mt-2 w-full h-10 rounded-xl bg-[#8B6CF6] text-white text-sm font-bold"
+                >
+                  Envoyer le lien
+                </button>
+              </div>
+            )}
 
             {!isSignup && (
               <label className="flex items-center gap-2 text-sm text-slate-500">

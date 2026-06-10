@@ -1,16 +1,18 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
 
-import Login from "../pages/Login/Login";
-import Dashboard from "../pages/Dashboard/Dashboard";
-import Courses from "../pages/courses/Courses";
-import Flashcards from "../pages/Flashcards/Flashcards";
-import Quiz from "../pages/Quiz/Quiz";
-import Planning from "../pages/Planning/Planning";
-import Todo from "../pages/Todo/Todo";
 import AppLayout from "../layouts/AppLayout";
 import { Navigate } from "react-router-dom";
-import VerifyEmail from "../pages/VerifyEmail/VerifyEmail";
-import ResetPassword from "../pages/ResetPassword/ResetPassword";
+
+const Login = lazy(() => import("../pages/Login/Login"));
+const Dashboard = lazy(() => import("../pages/Dashboard/Dashboard"));
+const Courses = lazy(() => import("../pages/courses/Courses"));
+const Flashcards = lazy(() => import("../pages/Flashcards/Flashcards"));
+const Quiz = lazy(() => import("../pages/Quiz/Quiz"));
+const Planning = lazy(() => import("../pages/Planning/Planning"));
+const Todo = lazy(() => import("../pages/Todo/Todo"));
+const VerifyEmail = lazy(() => import("../pages/VerifyEmail/VerifyEmail"));
+const ResetPassword = lazy(() => import("../pages/ResetPassword/ResetPassword"));
 
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -24,6 +26,7 @@ function ProtectedRoute({ children }) {
 
 function AppRoutes() {
   return (
+  <Suspense fallback={<div className="min-h-screen grid place-items-center font-bold text-[#8B6CF6]">Chargement...</div>}>
   <Routes>
     <Route path="/" element={<Login />} />
     <Route path="/verify-email/:uid/:token" element={<VerifyEmail />} />
@@ -47,9 +50,9 @@ function AppRoutes() {
       
     </Route>
   </Routes>
+  </Suspense>
 );
 }
 export default AppRoutes;
-
 
 

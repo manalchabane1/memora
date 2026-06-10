@@ -1,9 +1,21 @@
 from django.urls import path
-from .views import (register, login, verify_email,password_reset_confirm,password_reset_request)
+from .views import (
+    change_password,
+    login,
+    logout,
+    password_reset_confirm,
+    password_reset_request,
+    profile,
+    register,
+    verify_email,
+)
 
 urlpatterns = [
     path("register/", register),
     path("login/", login),
+    path("logout/", logout),
+    path("profile/", profile),
+    path("change-password/", change_password),
     path("verify-email/<uidb64>/<token>/", verify_email, name="verify_email"),
 
     path("password-reset/", password_reset_request),

@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { getCourses, uploadCoursePDF, deleteCourseApi,generateFlashcardsFromCourse, generateSummaryFromCourse,askQuestionFromCourse } from "../../services/api";
+import { getCourseFileBlob, getCourses, uploadCoursePDF, updateCourse, deleteCourseApi,generateFlashcardsFromCourse, generateSummaryFromCourse,askQuestionFromCourse } from "../../services/api";
 import {
   Search,
-  Plus,
   Filter,
-  Clock3,
-  BookOpen,
   ArrowRight,
   Grid3x3, 
   List,
@@ -45,15 +42,22 @@ function Courses() {
       const formatted = data.map((course) => ({
         id: course.id,
         title: course.title,
-        subjectId: "general",
+        subjectId: course.subject || "Général",
         description: "",
         chapters: [],
         summary: course.summary || "Résumé IA en attente.",
-        fileName: course.file?.split("/").pop() || "PDF",
-        fileUrl: course.file ,
+        fileName: course.file_name || "PDF",
       }));
 
       setCourses(formatted);
+      const colors = ["#8B6CF6", "#60A5FA", "#34D399", "#FBBF24", "#F472B6"];
+      setSubjects(
+        [...new Set(formatted.map((course) => course.subjectId))].map((name, index) => ({
+          id: name,
+          name,
+          color: colors[index % colors.length],
+        }))
+      );
     } catch (error) {
       console.error("Erreur chargement cours :", error);
     }
@@ -64,7 +68,7 @@ function Courses() {
 
   const getSubject = (id) =>
     subjects.find((s) => s.id === id) || {
-      id: "general",
+      id: "Général",
       name: "Sans matière",
       color: "#8B6CF6",
     };
@@ -92,31 +96,35 @@ function Courses() {
   }
 
   try {
-    const uploadedCourses = [];
-
     for (const file of pdfs) {
       const savedCourse = await uploadCoursePDF(file);
 
-      uploadedCourses.push({
+      const uploadedCourse = {
         id: savedCourse.id,
         title: savedCourse.title,
-        subjectId: "general",
+        subjectId: savedCourse.subject || "Général",
         description: "",
         chapters: [],
         summary: "Résumé IA en attente.",
-        fileName: savedCourse.file?.split("/").pop() || file.name,
-        fileUrl: savedCourse.file ,
-      });
+        fileName: savedCourse.file_name || file.name,
+      };
+
+      setCourses((prev) => [uploadedCourse, ...prev]);
     }
 
-    setCourses((prev) => [...uploadedCourses, ...prev]);
+    if (!subjects.some((subject) => subject.id === "Général")) {
+      setSubjects((prev) => [
+        ...prev,
+        { id: "Général", name: "Général", color: "#8B6CF6" },
+      ]);
+    }
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
   } catch (error) {
     console.error(error);
-    alert("Erreur pendant l’upload du PDF.");
+    alert(error.message);
   }
 };
 
@@ -170,15 +178,16 @@ const generateFlashcards = async (courseId) => {
 };
 
 const addSubject = () => {
-    if (!newSubject.trim()) return;
+    const name = newSubject.trim();
+    if (!name || subjects.some((subject) => subject.name.toLowerCase() === name.toLowerCase())) return;
 
     const colors = ["#8B6CF6", "#60A5FA", "#34D399", "#FBBF24", "#F472B6"];
 
     setSubjects((prev) => [
       ...prev,
       {
-        id: Date.now().toString(),
-        name: newSubject.trim(),
+        id: name,
+        name,
         color: colors[prev.length % colors.length],
       },
     ]);
@@ -186,15 +195,27 @@ const addSubject = () => {
     setNewSubject("");
   };
 
-  const renameCourse = (id, newTitle) => {
-    setCourses((prev) =>
-      prev.map((course) =>
-        course.id === id ? { ...course, title: newTitle } : course
-      )
-    );
+  const renameCourse = async (id, newTitle) => {
+    try {
+      await updateCourse(id, { title: newTitle });
+      setCourses((prev) =>
+        prev.map((course) => course.id === id ? { ...course, title: newTitle } : course)
+      );
+      if (openCourse?.id === id) setOpenCourse((prev) => ({ ...prev, title: newTitle }));
+    } catch (error) {
+      alert(error.message);
+    }
+  };
 
-    if (openCourse?.id === id) {
-      setOpenCourse((prev) => ({ ...prev, title: newTitle }));
+  const assignSubject = async (id, subjectId) => {
+    try {
+      await updateCourse(id, { subject: subjectId });
+      setCourses((prev) =>
+        prev.map((course) => course.id === id ? { ...course, subjectId } : course)
+      );
+      setOpenCourse((prev) => prev?.id === id ? { ...prev, subjectId } : prev);
+    } catch (error) {
+      alert(error.message);
     }
   };
 
@@ -406,6 +427,8 @@ const addSubject = () => {
           onGenerateFlashcards={generateFlashcards}
           loadingFlashcards={loadingFlashcards}
           flashcardsReady={flashcardsReady}
+          subjects={subjects}
+          onAssignSubject={assignSubject}
         />
       )}
     </div>
@@ -547,14 +570,26 @@ function CourseRow({ course, getSubject, onOpen, onDelete }) {
   );
 }
 
-function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGenerateSummary,loadingSummary,onGenerateFlashcards,loadingFlashcards, flashcardsReady }) {
+function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGenerateSummary,loadingSummary,onGenerateFlashcards,loadingFlashcards, flashcardsReady, subjects, onAssignSubject }) {
   const subject = getSubject(course.subjectId);
   const [title, setTitle] = useState(course.title);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
-  const pdfUrl = course.fileUrl?.startsWith("http")
-  ? course.fileUrl
-  : `http://127.0.0.1:8000${course.fileUrl}`;
+  const [pdfUrl, setPdfUrl] = useState("");
+
+  useEffect(() => {
+    let objectUrl = "";
+    getCourseFileBlob(course.id)
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        setPdfUrl(objectUrl);
+      })
+      .catch(() => setPdfUrl(""));
+
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [course.id]);
 
   const save = () => {
     if (title.trim() !== "") {
@@ -604,7 +639,7 @@ function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGener
       <div className="relative z-10 hidden lg:block w-[calc(100vw-580px)] p-8">
   <div className="h-full rounded-3xl border border-slate-200 overflow-hidden bg-white shadow-2xl">
     
-    {course.fileUrl ? (
+    {pdfUrl ? (
   
     
 
@@ -655,6 +690,13 @@ function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGener
 
         <div className="p-8">
           <div className="grid gap-3 mb-6">
+  <select
+    value={course.subjectId}
+    onChange={(e) => onAssignSubject(course.id, e.target.value)}
+    className="w-full h-12 rounded-2xl border border-slate-200 px-4 font-bold"
+  >
+    {subjects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+  </select>
   
 
   <button
@@ -812,14 +854,6 @@ function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGener
         </div>
       </aside>
     </div>
-  );
-}
-
-function Meta({ label }) {
-  return (
-    <span className="px-3 py-1 rounded-full bg-white/20 text-xs font-bold">
-      {label}
-    </span>
   );
 }
 

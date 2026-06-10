@@ -1,19 +1,24 @@
 import os
 import json
+import logging
 from dotenv import load_dotenv
 from google import genai
 import time
 
-from .prompts import flashcards_prompt
-
 load_dotenv()
 
 API_KEY = os.getenv("GEMINI_API_KEY")
+client = None
+logger = logging.getLogger(__name__)
 
-if not API_KEY:
-    raise ValueError("Missing GEMINI_API_KEY in .env")
 
-client = genai.Client(api_key=API_KEY)
+def get_client():
+    global client
+    if client is None:
+        if not API_KEY:
+            raise ValueError("Missing GEMINI_API_KEY in .env")
+        client = genai.Client(api_key=API_KEY)
+    return client
 
 
 def generate_flashcards_with_gemini(text):
@@ -39,14 +44,12 @@ Cours :
 """
 
     try:
-        response = client.models.generate_content(
+        response = get_client().models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
         )
 
         raw_text = response.text.strip()
-
-        print("RAW GEMINI =", raw_text)
 
         raw_text = raw_text.replace("```json", "")
         raw_text = raw_text.replace("```", "")
@@ -57,21 +60,15 @@ Cours :
         return cards
 
     except Exception as e:
-        print("ERREUR GEMINI :", e)
+        logger.exception("Gemini flashcard generation failed")
 
-        return [
-            {
-                "question": "Question test",
-                "answer": "Réponse test",
-                "difficulty": "easy"
-            }
-        ]
+        return []
 
 
 
 def generate_summary_with_gemini(text):
     prompt = f""" 
-Tu es un assistant de révision.flashcards_promptRésumé clairement ce cours pour un étudiant.
+Tu es un assistant de révision. Résume clairement ce cours pour un étudiant.
 Le résumé doit être structuré avec :
 -les idées principales 
 -les notions importantes
@@ -83,12 +80,12 @@ Cours:
     
     for attempt in range(3):
         try :
-            response = client.models.generate_content(
+            response = get_client().models.generate_content(
                 model="gemini-2.5-flash",contents =prompt,
             )
             return response.text.strip()
-        except Exception as e :
-            print(f"Attempt {attempt+1} field:",e)
+        except Exception:
+            logger.exception("Gemini summary attempt %s failed", attempt + 1)
             time.sleep(2)
 
     return ""        
@@ -113,14 +110,14 @@ Réponse claire et concise :
 
     for attempt in range(3):
         try:
-            response = client.models.generate_content(
+            response = get_client().models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
             )
             return response.text.strip()
 
-        except Exception as e:
-            print(f"Attempt {attempt+1} failed:", e)
+        except Exception:
+            logger.exception("Gemini question attempt %s failed", attempt + 1)
             time.sleep(2)
 
     return "Erreur : impossible de générer une réponse."
@@ -153,7 +150,7 @@ Cours :
 
     for attempt in range(3):
         try:
-            response = client.models.generate_content(
+            response = get_client().models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
             )
@@ -163,8 +160,8 @@ Cours :
 
             return json.loads(raw_text)
 
-        except Exception as e:
-            print(f"Attempt quiz {attempt+1} failed:", e)
+        except Exception:
+            logger.exception("Gemini quiz attempt %s failed", attempt + 1)
             time.sleep(2)
 
     return []
@@ -196,7 +193,7 @@ Important :
 
     for attempt in range(3):
         try:
-            response = client.models.generate_content(
+            response = get_client().models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
             )
@@ -206,8 +203,8 @@ Important :
 
             return json.loads(raw_text)
 
-        except Exception as e:
-            print(f"Attempt personal quiz {attempt+1} failed:", e)
+        except Exception:
+            logger.exception("Gemini personal quiz attempt %s failed", attempt + 1)
             time.sleep(2)
 
     return []

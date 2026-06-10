@@ -1,6 +1,13 @@
-import { useRef, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import image from "/src/assets/image.png";
-import axios from "axios";
+import {
+    deleteQuizApi,
+    generatePersonalQuiz,
+    generateQuizFromDeck as generateQuizFromDeckApi,
+    getDecks,
+    getQuizzes,
+    submitQuiz,
+} from "../../services/api";
 import {
     Play,
     Sparkles,
@@ -13,40 +20,25 @@ import {
     Trash2,
 } from "lucide-react";
 
-const quizzesData = [
-    {
-        id: 1,
-        title: "Limites — niveau 1",
-        subject: "Mathématiques",
-        color: "#8B6CF6",
-        time: "8 min",
-        difficulty: "Facile",
-        questions: [
-            {
-                question: "Que signifie lim f(x) quand x tend vers a ?",
-                options: [
-                    "La valeur exacte de f(a)",
-                    "Le comportement de f(x) proche de a",
-                    "La dérivée de f",
-                    "L’intégrale de f",
-                ],
-                answer: 1,
-                hint: "On regarde ce qui se passe près du point.",
-            },
-            {
-                question: "La fonction f(x)=x² est-elle continue sur R ?",
-                options: ["Oui", "Non", "Seulement en 0", "Seulement sur R+"],
-                answer: 0,
-                hint: "Les polynômes sont continus partout.",
-            },
-        ],
-    },
-];
+function formatQuiz(quiz) {
+    return {
+        id: quiz.id,
+        deckId: quiz.deck,
+        title: quiz.title.replace("Flashcards - ", "").replace("Quiz - ", ""),
+        subject: quiz.subject,
+        color: quiz.subject === "Personnalisé" ? "#FBBF24" : "#8B6CF6",
+        time: "5 min",
+        difficulty: "IA",
+        questions: (quiz.quiz_questions || []).map((question) => ({
+            id: question.id,
+            question: question.question,
+            options: question.choices,
+        })),
+    };
+}
 
 function Quiz() {
-    const fileInputRef = useRef(null);
-
-    const [quizzes, setQuizzes] = useState(quizzesData);
+    const [quizzes, setQuizzes] = useState([]);
     const [decks, setDecks] = useState([]);
     const [showCourses, setShowCourses] = useState(false);
     const [loadingQuizCourseId, setLoadingQuizCourseId] = useState(null);
@@ -59,65 +51,25 @@ function Quiz() {
     const [score, setScore] = useState(0);
     const [showHint, setShowHint] = useState(false);
     const [finished, setFinished] = useState(false);
-
-    const authConfig = {
-        headers: {
-            Authorization: `Token ${localStorage.getItem("token")}`,
-        },
-    };
+    const [answers, setAnswers] = useState({});
+    const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
-        fetchDecks();
-        fetchQuizzes();
+        async function loadQuizData() {
+            try {
+                const [loadedDecks, loadedQuizzes] = await Promise.all([getDecks(), getQuizzes()]);
+                setDecks(loadedDecks);
+                setQuizzes(loadedQuizzes.map(formatQuiz));
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        loadQuizData();
     }, []);
 
-    const fetchDecks = async () => {
-        try {
-            const res = await axios.get(
-                "http://127.0.0.1:8000/api/courses/decks/",
-                authConfig
-            );
-
-            setDecks(res.data);
-
-        } catch (err) {
-            console.error(err);
-        }
-    };
-
-    const fetchQuizzes = async () => {
-        try {
-            const res = await axios.get("http://127.0.0.1:8000/api/courses/quizzes/", authConfig);
-
-            const formatted = res.data.map((quiz) => ({
-                id: quiz.id,
-                title: quiz.title
-                    .replace("Flashcards - ", "")
-                    .replace("Quiz - ", ""),
-                subject: quiz.subject,
-                color: quiz.subject === "Personnalisé" ? "#FBBF24" : "#8B6CF6",
-                time: "5 min",
-                difficulty: "IA",
-                questions: (quiz.quiz_questions || []).map((q) => ({
-                    question: q.question,
-                    options: q.choices,
-                    answer: q.choices.indexOf(q.correct_answer),
-                    hint: q.explanation,
-                })),
-            }));
-
-            setQuizzes(formatted);
-        } catch (err) {
-            console.error(err);
-        }
-    };
-
     const generateQuizFromDeck = async (deck) => {
-        const cleanDeckTitle = deck.title.replace("Flashcards - ", "");
-
-        const existingQuiz = quizzes.find(
-            (q) => q.title === cleanDeckTitle
-        );
+        const existingQuiz = quizzes.find((quiz) => quiz.deckId === deck.id);
 
         if (existingQuiz) {
             alert("Quiz déjà généré.");
@@ -127,28 +79,13 @@ function Quiz() {
         try {
             setLoadingQuizCourseId(deck.id);
 
-            const res = await axios.post(
-                `http://127.0.0.1:8000/api/courses/decks/${deck.id}/generate-quiz/`,
-                {},
-                authConfig
-            );
-
-            const newQuiz = {
-                id: res.data.id,
-                title: res.data.title
-                    .replace("Flashcards - ", "")
-                    .replace("Quiz - ", ""),
-                subject: res.data.subject,
-                color: "#8B6CF6",
-                time: "5 min",
-                difficulty: "IA",
-                questions: (res.data.quiz_questions || []).map((q) => ({
-                    question: q.question,
-                    options: q.choices,
-                    answer: q.choices.indexOf(q.correct_answer),
-                    hint: q.explanation,
-                })),
-            };
+            const result = await generateQuizFromDeckApi(deck.id);
+            if (result.already_exists) {
+                alert(result.message || "Quiz déjà généré.");
+                setShowCourses(false);
+                return;
+            }
+            const newQuiz = formatQuiz(result);
 
             setQuizzes((prev) => [newQuiz, ...prev]);
             setShowCourses(false);
@@ -166,28 +103,8 @@ function Quiz() {
         try {
             setLoadingPersonalQuiz(true);
 
-            const res = await axios.post(
-                "http://127.0.0.1:8000/api/courses/generate-personal-quiz/",
-                {
-                    topic: personalTopic,
-                },
-                authConfig
-            );
-
-            const newQuiz = {
-                id: res.data.id,
-                title: res.data.title,
-                subject: res.data.subject,
-                color: "#FBBF24",
-                time: "6 min",
-                difficulty: "IA",
-                questions: (res.data.quiz_questions || []).map((q) => ({
-                    question: q.question,
-                    options: q.choices,
-                    answer: q.choices.indexOf(q.correct_answer),
-                    hint: q.explanation,
-                })),
-            };
+            const result = await generatePersonalQuiz(personalTopic);
+            const newQuiz = formatQuiz(result);
 
             setQuizzes((prev) => [newQuiz, ...prev]);
             setPersonalTopic("");
@@ -202,7 +119,7 @@ function Quiz() {
 
     const deleteQuiz = async (quizId) => {
         try {
-            await axios.delete(`http://127.0.0.1:8000/api/courses/quizzes/delete/${quizId}/`, authConfig);
+            await deleteQuizApi(quizId);
             setQuizzes((prev) => prev.filter((q) => q.id !== quizId));
         } catch (err) {
             console.error(err);
@@ -216,6 +133,7 @@ function Quiz() {
         setScore(0);
         setShowHint(false);
         setFinished(false);
+        setAnswers({});
     };
 
     const question = selectedQuiz?.questions[step];
@@ -225,14 +143,21 @@ function Quiz() {
 
         setSelectedAnswer(index);
 
-        if (index === question.answer) {
-            setScore((s) => s + 1);
-        }
+        setAnswers((previous) => ({ ...previous, [question.id]: question.options[index] }));
     };
 
-    const nextQuestion = () => {
+    const nextQuestion = async () => {
         if (step + 1 >= selectedQuiz.questions.length) {
-            setFinished(true);
+            try {
+                setSubmitting(true);
+                const result = await submitQuiz(selectedQuiz.id, answers);
+                setScore(result.score);
+                setFinished(true);
+            } catch (error) {
+                alert(error.message);
+            } finally {
+                setSubmitting(false);
+            }
         } else {
             setStep((s) => s + 1);
             setSelectedAnswer(null);
@@ -255,6 +180,7 @@ function Quiz() {
                 chooseAnswer={chooseAnswer}
                 nextQuestion={nextQuestion}
                 restart={restart}
+                submitting={submitting}
             />
         );
     }
@@ -272,14 +198,6 @@ function Quiz() {
 
     return (
         <div className="p-8 max-w-[1500px] mx-auto text-[#1E293B]">
-            <input
-                ref={fileInputRef}
-                type="file"
-                accept="application/pdf"
-                hidden
-                onChange={(e) => createQuizFromPdf(e.target.files)}
-            />
-
             <header className="flex items-end justify-between mb-8">
                 <div>
                     <p className="text-xs font-extrabold uppercase tracking-wider text-[#8B6CF6]">
@@ -431,6 +349,7 @@ function QuizCard({ quiz, onStart, onDelete }) {
 
             <button
                 onClick={onStart}
+                disabled={quiz.questions.length === 0}
                 className="mt-7 w-full h-12 rounded-2xl text-white font-bold flex items-center justify-center gap-2"
                 style={{ background: quiz.color }}
             >
@@ -460,6 +379,7 @@ function QuizArena({
     chooseAnswer,
     nextQuestion,
     restart,
+    submitting,
 }) {
     if (!question) {
         return (
@@ -532,17 +452,11 @@ function QuizArena({
                     <section className="grid md:grid-cols-2 gap-4 mt-6">
                         {question.options.map((option, index) => {
                             const isSelected = selectedAnswer === index;
-                            const isCorrect = question.answer === index;
-                            const isWrong = isSelected && !isCorrect;
 
                             let style = "bg-white border-slate-100 hover:border-[#8B6CF6]/40";
 
-                            if (selectedAnswer !== null && isCorrect) {
-                                style = "bg-emerald-50 border-emerald-300 text-emerald-700";
-                            }
-
-                            if (isWrong) {
-                                style = "bg-red-50 border-red-300 text-red-600";
+                            if (isSelected) {
+                                style = "bg-[#8B6CF6]/10 border-[#8B6CF6] text-[#7C3AED]";
                             }
 
                             return (
@@ -564,9 +478,14 @@ function QuizArena({
                         <div className="mt-6 flex justify-end">
                             <button
                                 onClick={nextQuestion}
+                                disabled={submitting}
                                 className="h-12 px-6 rounded-2xl bg-[#1E293B] text-white font-bold flex items-center gap-2"
                             >
-                                Question suivante
+                                {submitting
+                                    ? "Correction..."
+                                    : step + 1 >= total
+                                        ? "Terminer le quiz"
+                                        : "Question suivante"}
                                 <ArrowRight size={18} />
                             </button>
                         </div>
@@ -592,7 +511,7 @@ function QuizArena({
 
                         {showHint && (
                             <p className="mt-4 text-sm text-slate-500 bg-slate-50 p-4 rounded-2xl text-center">
-                                {question.hint}
+                                Relis attentivement les quatre propositions avant de répondre.
                             </p>
                         )}
                     </div>

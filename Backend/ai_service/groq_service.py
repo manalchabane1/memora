@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -11,13 +12,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 api_key = os.getenv("GROQ_API_KEY")
-
-if not api_key:
-    raise ValueError("GROQ_API_KEY not found in Backend/.env")
-
-client = Groq(api_key=api_key)
+client = None
+logger = logging.getLogger(__name__)
 
 MODEL = "llama-3.1-8b-instant"
+
+
+def get_client():
+    global client
+    if client is None:
+        if not api_key:
+            raise ValueError("GROQ_API_KEY not found in Backend/.env")
+        client = Groq(api_key=api_key)
+    return client
 
 
 def extract_json_array(text):
@@ -32,8 +39,7 @@ def extract_json_array(text):
     match = re.search(r"\[.*\]", cleaned, re.DOTALL)
 
     if not match:
-        print("No JSON array found in AI response:")
-        print(cleaned)
+        logger.warning("No JSON array found in AI response")
         return []
 
     json_text = match.group(0)
@@ -41,9 +47,7 @@ def extract_json_array(text):
     try:
         return json.loads(json_text)
     except json.JSONDecodeError as e:
-        print("JSON parsing error:", e)
-        print("Raw AI response:")
-        print(cleaned)
+        logger.warning("Could not parse AI response as JSON: %s", e)
         return []
 
 
@@ -92,7 +96,7 @@ Cours:
 {text[:8000]}
 """
 
-    response = client.chat.completions.create(
+    response = get_client().chat.completions.create(
         model=MODEL,
         messages=[
             {
@@ -159,7 +163,7 @@ Cours:
 {text[:10000]}
 """
 
-    response = client.chat.completions.create(
+    response = get_client().chat.completions.create(
         model=MODEL,
         messages=[
             {
@@ -216,7 +220,7 @@ Flashcards:
 {json.dumps(flashcards, ensure_ascii=False)}
 """
 
-    response = client.chat.completions.create(
+    response = get_client().chat.completions.create(
         model=MODEL,
         messages=[
             {
@@ -314,7 +318,7 @@ Sujet:
 {topic}
 """
 
-    response = client.chat.completions.create(
+    response = get_client().chat.completions.create(
         model=MODEL,
         messages=[
             {
@@ -389,7 +393,7 @@ Cours:
 {text[:10000]}
 """
 
-    response = client.chat.completions.create(
+    response = get_client().chat.completions.create(
         model=MODEL,
         messages=[
             {
@@ -457,7 +461,7 @@ Flashcards:
 {json.dumps(flashcards[:20], ensure_ascii=False)}
 """
 
-    response = client.chat.completions.create(
+    response = get_client().chat.completions.create(
         model=MODEL,
         messages=[
             {

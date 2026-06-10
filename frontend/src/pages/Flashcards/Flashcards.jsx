@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import flashcard from "/src/assets/flashcard.png";
 import memiImage from "/src/assets/mascot.png";
-import { getDecks, uploadCoursePDF, generateFlashcardsFromCourse } from "../../services/api";
+import { deleteDeck, getDecks, uploadCoursePDF, generateFlashcardsFromCourse } from "../../services/api";
 import {
   ChevronLeft,
   ChevronRight,
@@ -69,14 +69,38 @@ function Flashcards() {
   const finished = idx >= total;
 
 
-  useEffect(() => {
+  const selectDeck = (id) => {
+    setDeckId(id);
     setIdx(0);
     setFlipped(false);
     setProgress({ hard: 0, good: 0, easy: 0 });
     setShuffledCards([]);
-  }, [deckId]);
+  };
 
-   if (!deck) {
+  const handlePdf = async (files) => {
+    const pdf = Array.from(files || []).find((file) =>
+      file.name.toLowerCase().endsWith(".pdf")
+    );
+
+    if (!pdf) return alert("Choisis un fichier PDF.");
+
+    try {
+      const savedCourse = await uploadCoursePDF(pdf);
+      await generateFlashcardsFromCourse(savedCourse.id);
+
+      const data = await getDecks();
+      setDecks(data);
+      setDeckId(data[0]?.id || null);
+      setMode("study");
+
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (error) {
+      console.error(error);
+      alert(error.message);
+    }
+  };
+
+  if (!deck) {
   return (
     <div className="relative min-h-screen p-8 max-w-[1500px] mx-auto text-[#1E293B] overflow-hidden">
         <div className="absolute inset-0 -z-10 bg-gradient-to-br from-[#F8FAFC] via-[#F3E8FF] to-[#EEF2FF]" />
@@ -106,7 +130,7 @@ function Flashcards() {
         </div>
       </header>
 
-      <PdfGenerator onClick={() => window.location.href = "/courses"} />
+      <PdfGenerator onClick={() => fileInputRef.current?.click()} />
     </div>
   );
 }
@@ -117,7 +141,11 @@ function Flashcards() {
   };
 
   const shuffleCards = () => {
-  const shuffled = [...deck.cards].sort(() => Math.random() - 0.5);
+  const shuffled = [...deck.cards];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
 
   setShuffledCards(shuffled);
   setIdx(0);
@@ -129,32 +157,6 @@ function Flashcards() {
     setFlipped(false);
     setTimeout(() => setIdx((i) => i + 1), 200);
   };
-
-  const handlePdf = async (files) => {
-    const pdf = Array.from(files || []).find((file) =>
-      file.name.toLowerCase().endsWith(".pdf")
-    );
-
-    if (!pdf) return alert("Choisis un fichier PDF.");
-
-    try {
-      const savedCourse = await uploadCoursePDF(pdf);
-
-      await generateFlashcardsFromCourse(savedCourse.id);
-
-      const data = await getDecks();
-
-      setDecks(data);
-      setDeckId(data[0].id);
-      setMode("study");
-
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    } catch (error) {
-      console.error(error);
-      alert("Erreur pendant la génération des flashcards.");
-    }
-  };
-
 
   return (
     <div className="relative min-h-screen p-8 max-w-[1500px] mx-auto text-[#1E293B] overflow-hidden">
@@ -211,7 +213,7 @@ function Flashcards() {
       </div>
 
       {mode === "pdf" ? (
-  <PdfGenerator onClick={() => window.location.href = "/courses"} />
+  <PdfGenerator onClick={() => fileInputRef.current?.click()} />
 ) : (
         <div className="space-y-8">
           <aside className="max-w-[950px] mx-auto">
@@ -229,7 +231,7 @@ function Flashcards() {
               {filteredDecks.map((d) => (
                 <div
   key={d.id}
-  onClick={() => setDeckId(d.id)}
+  onClick={() => selectDeck(d.id)}
   className={`relative min-w-[280px] text-left p-4 rounded-2xl flex gap-4 transition cursor-pointer ${
   d.id === deckId ? "bg-[#8B6CF6]/10" : "hover:bg-slate-50"
 }`}
@@ -246,24 +248,16 @@ function Flashcards() {
     e.stopPropagation();
 
     try {
-      const token = localStorage.getItem("token");
-
-await fetch(
-  `http://127.0.0.1:8000/api/courses/flashcards/delete/${d.id}/`,
-  {
-    method: "DELETE",
-    headers: {
-      Authorization: `Token ${token}`,
-    },
-  }
-);
+      await deleteDeck(d.id);
 
       const updatedDecks = decks.filter((deck) => deck.id !== d.id);
 
       setDecks(updatedDecks);
 
-      if (updatedDecks.length > 0) {
-        setDeckId(updatedDecks[0].id);
+      if (updatedDecks.length === 0) {
+        setDeckId(null);
+      } else if (d.id === deckId) {
+        selectDeck(updatedDecks[0].id);
       }
 
     } catch (error) {
@@ -422,7 +416,6 @@ await fetch(
               <p className="relative mt-10 text-slate-400 font-semibold">
         
                 Clique pour retourner la carte
-                style
               </p>
             </div>
 

@@ -1,225 +1,285 @@
-const API_URL = "http://127.0.0.1:8000/api";
+export const API_ORIGIN = (import.meta.env.VITE_API_ORIGIN || "http://127.0.0.1:8000").replace(
+  /\/$/,
+  ""
+);
+const API_URL = `${API_ORIGIN}/api`;
 
 function getAuthHeaders() {
   const token = localStorage.getItem("token");
-
   return token ? { Authorization: `Token ${token}` } : {};
 }
 
 async function handleResponse(response, errorMessage) {
-  if (!response.ok) {
-    let details = "";
-
-    try {
-      const data = await response.json();
-      details = data.error || data.detail || data.message || JSON.stringify(data);
-    } catch {
-      details = "";
-    }
-
-    throw new Error(details || errorMessage);
+  if (response.status === 401) {
+    localStorage.removeItem("token");
+    window.dispatchEvent(new Event("auth-expired"));
   }
 
+  if (!response.ok) {
+    let data;
+    try {
+      data = await response.json();
+    } catch (error) {
+      throw new Error(errorMessage, { cause: error });
+    }
+    const details = data.error || data.detail || data.message || JSON.stringify(data);
+    throw new Error(Array.isArray(details) ? details.join(" ") : details);
+  }
+
+  if (response.status === 204) return null;
   return response.json();
 }
 
-/* ---------------- COURSES ---------------- */
-
-export async function getCourses() {
-  const response = await fetch(`${API_URL}/courses/`, {
+async function apiFetch(path, options = {}, errorMessage = "Erreur API") {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
     headers: {
       ...getAuthHeaders(),
+      ...options.headers,
     },
   });
+  return handleResponse(response, errorMessage);
+}
 
-  return handleResponse(response, "Erreur chargement cours");
+function jsonOptions(method, data) {
+  return {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  };
+}
+
+export function loginAccount(credentials) {
+  return apiFetch("/auth/login/", jsonOptions("POST", credentials), "Erreur authentification");
+}
+
+export function registerAccount(data) {
+  return apiFetch("/auth/register/", jsonOptions("POST", data), "Erreur inscription");
+}
+
+export function verifyEmail(uid, token) {
+  return apiFetch(
+    `/accounts/verify-email/${uid}/${token}/`,
+    {},
+    "Erreur de vérification"
+  );
+}
+
+export function confirmPasswordReset(uid, token, password) {
+  return apiFetch(
+    `/auth/password-reset-confirm/${uid}/${token}/`,
+    jsonOptions("POST", { password }),
+    "Erreur réinitialisation mot de passe"
+  );
+}
+
+export function getProfile() {
+  return apiFetch("/auth/profile/", {}, "Erreur chargement profil");
+}
+
+export function updateProfile(data) {
+  return apiFetch("/auth/profile/", jsonOptions("PATCH", data), "Erreur modification profil");
+}
+
+export function changePassword(data) {
+  return apiFetch(
+    "/auth/change-password/",
+    jsonOptions("POST", data),
+    "Erreur modification mot de passe"
+  );
+}
+
+export function logoutApi() {
+  return apiFetch("/auth/logout/", { method: "POST" }, "Erreur déconnexion");
+}
+
+export function requestPasswordReset(email) {
+  return apiFetch(
+    "/auth/password-reset/",
+    jsonOptions("POST", { email }),
+    "Erreur demande de réinitialisation"
+  );
+}
+
+export function getCourses() {
+  return apiFetch("/courses/", {}, "Erreur chargement cours");
+}
+
+export async function getCourseFileBlob(courseId) {
+  const response = await fetch(`${API_URL}/courses/${courseId}/file/`, {
+    headers: getAuthHeaders(),
+  });
+  if (!response.ok) await handleResponse(response, "Erreur chargement PDF");
+  return response.blob();
 }
 
 export async function uploadCoursePDF(file) {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("title", file.name.replace(/\.pdf$/i, ""));
-
-  const response = await fetch(`${API_URL}/courses/upload/`, {
-    method: "POST",
-    headers: {
-      ...getAuthHeaders(),
-    },
-    body: formData,
-  });
-
-  return handleResponse(response, "Erreur upload PDF");
-}
-
-export async function deleteCourseApi(id) {
-  const response = await fetch(`${API_URL}/courses/${id}/`, {
-    method: "DELETE",
-    headers: {
-      ...getAuthHeaders(),
-    },
-  });
-
-  return handleResponse(response, "Erreur suppression cours");
-}
-
-/* ---------------- FLASHCARDS ---------------- */
-
-export async function getDecks() {
-  const response = await fetch(`${API_URL}/courses/decks/`, {
-    headers: {
-      ...getAuthHeaders(),
-    },
-  });
-
-  return handleResponse(response, "Erreur chargement flashcards");
-}
-
-export async function generateFlashcardsFromCourse(courseId) {
-  const response = await fetch(
-    `${API_URL}/courses/${courseId}/generate-flashcards/`,
-    {
-      method: "POST",
-      headers: {
-        ...getAuthHeaders(),
-      },
-    }
+  return apiFetch(
+    "/courses/upload/",
+    { method: "POST", body: formData },
+    "Erreur upload PDF"
   );
-
-  return handleResponse(response, "Erreur génération flashcards");
 }
 
-/* ---------------- SUMMARY / CHAT PDF ---------------- */
+export function updateCourse(id, data) {
+  return apiFetch(`/courses/${id}/`, jsonOptions("PATCH", data), "Erreur modification cours");
+}
 
-export async function generateSummaryFromCourse(courseId) {
-  const response = await fetch(
-    `${API_URL}/courses/${courseId}/generate-summary/`,
-    {
-      method: "POST",
-      headers: {
-        ...getAuthHeaders(),
-      },
-    }
+export function deleteCourseApi(id) {
+  return apiFetch(`/courses/${id}/`, { method: "DELETE" }, "Erreur suppression cours");
+}
+
+export function getDecks() {
+  return apiFetch("/courses/decks/", {}, "Erreur chargement flashcards");
+}
+
+export function deleteDeck(id) {
+  return apiFetch(
+    `/courses/flashcards/delete/${id}/`,
+    { method: "DELETE" },
+    "Erreur suppression flashcards"
   );
-
-  return handleResponse(response, "Erreur génération résumé");
 }
 
-export async function askQuestionFromCourse(courseId, question) {
-  const response = await fetch(`${API_URL}/courses/${courseId}/ask/`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getAuthHeaders(),
-    },
-    body: JSON.stringify({ question }),
-  });
-
-  return handleResponse(response, "Erreur question IA");
+export function generateFlashcardsFromCourse(courseId) {
+  return apiFetch(
+    `/courses/${courseId}/generate-flashcards/`,
+    { method: "POST" },
+    "Erreur génération flashcards"
+  );
 }
 
-/* ---------------- TODOS ---------------- */
-
-export async function getTodos() {
-  const response = await fetch(`${API_URL}/todos/`, {
-    headers: {
-      ...getAuthHeaders(),
-    },
-  });
-
-  return handleResponse(response, "Erreur chargement todos");
+export function generateSummaryFromCourse(courseId) {
+  return apiFetch(
+    `/courses/${courseId}/generate-summary/`,
+    { method: "POST" },
+    "Erreur génération résumé"
+  );
 }
 
-export async function createTodo(todo) {
-  const response = await fetch(`${API_URL}/todos/`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getAuthHeaders(),
-    },
-    body: JSON.stringify(todo),
-  });
-
-  return handleResponse(response, "Erreur création todo");
+export function askQuestionFromCourse(courseId, question) {
+  return apiFetch(
+    `/courses/${courseId}/ask/`,
+    jsonOptions("POST", { question }),
+    "Erreur question IA"
+  );
 }
 
-export async function updateTodo(id, data) {
-  const response = await fetch(`${API_URL}/todos/${id}/`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...getAuthHeaders(),
-    },
-    body: JSON.stringify(data),
-  });
-
-  return handleResponse(response, "Erreur modification todo");
+export function getQuizzes() {
+  return apiFetch("/courses/quizzes/", {}, "Erreur chargement quiz");
 }
 
-export async function deleteTodoApi(id) {
-  const response = await fetch(`${API_URL}/todos/${id}/`, {
-    method: "DELETE",
-    headers: {
-      ...getAuthHeaders(),
-    },
-  });
-
-  return handleResponse(response, "Erreur suppression todo");
+export function generateQuizFromDeck(deckId) {
+  return apiFetch(
+    `/courses/decks/${deckId}/generate-quiz/`,
+    { method: "POST" },
+    "Erreur génération quiz"
+  );
 }
 
-/* ---------------- PLANNING ---------------- */
-
-export async function getAvailabilities() {
-  const response = await fetch(`${API_URL}/planning/availabilities/`, {
-    headers: {
-      ...getAuthHeaders(),
-    },
-  });
-
-  return handleResponse(response, "Erreur chargement disponibilités");
+export function generatePersonalQuiz(topic) {
+  return apiFetch(
+    "/courses/generate-personal-quiz/",
+    jsonOptions("POST", { topic }),
+    "Erreur génération quiz"
+  );
 }
 
-export async function createAvailability(availability) {
-  const response = await fetch(`${API_URL}/planning/availabilities/`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getAuthHeaders(),
-    },
-    body: JSON.stringify(availability),
-  });
-
-  return handleResponse(response, "Erreur création disponibilité");
+export function submitQuiz(quizId, answers) {
+  return apiFetch(
+    `/courses/quizzes/${quizId}/submit/`,
+    jsonOptions("POST", { answers }),
+    "Erreur correction quiz"
+  );
 }
 
-export async function getRevisionPlans() {
-  const response = await fetch(`${API_URL}/planning/`, {
-    headers: {
-      ...getAuthHeaders(),
-    },
-  });
-
-  return handleResponse(response, "Erreur chargement plannings");
+export function deleteQuizApi(quizId) {
+  return apiFetch(
+    `/courses/quizzes/delete/${quizId}/`,
+    { method: "DELETE" },
+    "Erreur suppression quiz"
+  );
 }
 
-export async function getRevisionSessions() {
-  const response = await fetch(`${API_URL}/planning/sessions/`, {
-    headers: {
-      ...getAuthHeaders(),
-    },
-  });
-
-  return handleResponse(response, "Erreur chargement séances");
+export function getTodos() {
+  return apiFetch("/todos/", {}, "Erreur chargement tâches");
 }
 
-export async function generateAiPlanning(data) {
-  const response = await fetch(`${API_URL}/planning/generate-ai/`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getAuthHeaders(),
-    },
-    body: JSON.stringify(data),
-  });
+export function createTodo(todo) {
+  return apiFetch("/todos/", jsonOptions("POST", todo), "Erreur création tâche");
+}
 
-  return handleResponse(response, "Erreur génération planning IA");
+export function updateTodo(id, data) {
+  return apiFetch(`/todos/${id}/`, jsonOptions("PATCH", data), "Erreur modification tâche");
+}
+
+export function deleteTodoApi(id) {
+  return apiFetch(`/todos/${id}/`, { method: "DELETE" }, "Erreur suppression tâche");
+}
+
+export function getAvailabilities() {
+  return apiFetch("/planning/availabilities/", {}, "Erreur chargement disponibilités");
+}
+
+export function createAvailability(availability) {
+  return apiFetch(
+    "/planning/availabilities/",
+    jsonOptions("POST", availability),
+    "Erreur création disponibilité"
+  );
+}
+
+export function deleteAvailability(id) {
+  return apiFetch(
+    `/planning/availabilities/${id}/`,
+    { method: "DELETE" },
+    "Erreur suppression disponibilité"
+  );
+}
+
+export function getRevisionPlans() {
+  return apiFetch("/planning/", {}, "Erreur chargement plannings");
+}
+
+export function createRevisionPlan(plan) {
+  return apiFetch("/planning/", jsonOptions("POST", plan), "Erreur création planning");
+}
+
+export function getRevisionSessions() {
+  return apiFetch("/planning/sessions/", {}, "Erreur chargement séances");
+}
+
+export function createRevisionSession(session) {
+  return apiFetch(
+    "/planning/sessions/",
+    jsonOptions("POST", session),
+    "Erreur création séance"
+  );
+}
+
+export function updateRevisionSession(id, data) {
+  return apiFetch(
+    `/planning/sessions/${id}/`,
+    jsonOptions("PATCH", data),
+    "Erreur modification séance"
+  );
+}
+
+export function deleteRevisionSession(id) {
+  return apiFetch(
+    `/planning/sessions/${id}/`,
+    { method: "DELETE" },
+    "Erreur suppression séance"
+  );
+}
+
+export function generateAiPlanning(data) {
+  return apiFetch(
+    "/planning/generate-ai/",
+    jsonOptions("POST", data),
+    "Erreur génération planning IA"
+  );
 }

@@ -13,6 +13,7 @@ Backend/.env
 # Database
 db.sqlite3
 Backend/db.sqlite3
+Backend/*.sqlite3
 
 # VS Code
 .vscode/

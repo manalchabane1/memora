@@ -1,36 +1,58 @@
-from django.shortcuts import render
-
-# Create your views here.
+import logging
 
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db import transaction
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from django.contrib.auth.tokens import default_token_generator
+from django.core.validators import validate_email
 
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from rest_framework.authtoken.models import Token
+
+
+logger = logging.getLogger(__name__)
+
+
+def get_display_name(user):
+    name = user.first_name.strip()
+    if name:
+        return name
+
+    email_local_part = (user.email or user.username).split("@", 1)[0]
+    words = [
+        word
+        for word in email_local_part.replace("-", ".").replace("_", ".").split(".")
+        if word and not word.isdigit()
+    ]
+    return " ".join(word.capitalize() for word in words) or "Utilisateur"
 
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def register(request):
-    print("REGISTER DATA =", request.data)
-
-    username = request.data.get("username")
-    email = request.data.get("email") or request.data.get("username")
+    email = (request.data.get("email") or request.data.get("username") or "").strip().lower()
+    username = email
     password = request.data.get("password")
-    name = request.data.get("name")
+    name = (request.data.get("name") or "").strip()
 
-    if not username or not password or not email:
+    if not username or not password or not email or not name:
         return Response({"error": "Champs manquants"}, status=400)
+    if len(email) > User._meta.get_field("username").max_length:
+        return Response({"error": "Adresse e-mail trop longue"}, status=400)
+    if len(name) > User._meta.get_field("first_name").max_length:
+        return Response({"error": "Nom trop long"}, status=400)
+    try:
+        validate_email(email)
+    except ValidationError:
+        return Response({"error": "Adresse e-mail invalide"}, status=400)
 
     if User.objects.filter(username=username).exists():
         return Response({"error": "Utilisateur déjà existe"}, status=400)
@@ -38,57 +60,60 @@ def register(request):
     if User.objects.filter(email=email).exists():
         return Response({"error": "Email déjà utilisé"}, status=400)
 
-    user = User.objects.create_user(
-    username=username,
-    first_name=name,
-    password=password,
-    email=email
-)
-    user.is_active = False
-    user.save()
-    print("USER CREATED =", user.username, "ACTIVE =", user.is_active)  
+    candidate = User(username=username, email=email, first_name=name)
+    try:
+        validate_password(password, user=candidate)
+    except ValidationError as exc:
+        return Response({"error": exc.messages}, status=400)
 
-    uid = urlsafe_base64_encode(force_bytes(user.pk))
-    token = default_token_generator.make_token(user)
-
-    
-    verification_link = f"{settings.FRONTEND_URL}/verify-email/{uid}/{token}/"
-    send_mail(
-        subject="Vérification de votre compte Memora",
-        message=(
-            f"Bonjour {user.first_name},\n\n"
-            f"Bienvenue sur Memora.\n\n"
-            f"Cliquez sur ce lien pour vérifier votre compte :\n"
-            f"{verification_link}\n\n"
-            f"Si vous n'êtes pas à l'origine de cette inscription, ignorez ce message."
-            ),
-            from_email= settings.EMAIL_HOST_USER,
-            recipient_list=[user.email],
-            fail_silently=False,
+    try:
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=username,
+                first_name=name,
+                password=password,
+                email=email,
+                is_active=False,
             )
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            verification_link = f"{settings.FRONTEND_URL}/verify-email/{uid}/{token}/"
+            send_mail(
+                subject="Vérification de votre compte Memora",
+                message=(
+                    f"Bonjour {get_display_name(user)},\n\n"
+                    f"Bienvenue sur Memora.\n\n"
+                    f"Cliquez sur ce lien pour vérifier votre compte :\n"
+                    f"{verification_link}\n\n"
+                    "Si vous n'êtes pas à l'origine de cette inscription, ignorez ce message."
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+    except Exception:
+        logger.exception("Registration verification email failed")
+        return Response(
+            {"error": "Impossible d'envoyer l'email de vérification. Réessayez plus tard."},
+            status=503,
+        )
+
     return Response({
         "message": "Compte créé. Vérifiez votre email pour l'activer."
-        }, status=201)
+    }, status=201)
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def verify_email(request, uidb64, token):
-    print("VERIFY UID =", uidb64)
-    print("VERIFY TOKEN =", token)
-
     try:
         uid = force_str(urlsafe_base64_decode(uidb64))
         user = User.objects.get(pk=uid)
-    except Exception as e:
-        print("VERIFY ERROR =", e)
+    except Exception:
         return Response({"error": "Lien invalide"}, status=400)
-
-    print("USER =", user.username, "ACTIVE =", user.is_active)
 
     if default_token_generator.check_token(user, token):
         user.is_active = True
-        user.save()
-        Token.objects.get_or_create(user=user)
+        user.save(update_fields=["is_active"])
 
         return Response({
             "message": "Email vérifié avec succès. Vous pouvez maintenant vous connecter."
@@ -100,7 +125,7 @@ def verify_email(request, uidb64, token):
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def login(request):
-    username = request.data.get("username")
+    username = (request.data.get("username") or "").strip().lower()
     password = request.data.get("password")
 
     user = authenticate(username=username, password=password)
@@ -111,40 +136,110 @@ def login(request):
     if not user.is_active:
         return Response({"error": "Compte non vérifié. Vérifiez votre email."}, status=400)
     
-    token, _ = Token.objects.get_or_create(user=user)
+    Token.objects.filter(user=user).delete()
+    token = Token.objects.create(user=user)
 
     return Response({
         "token": token.key,
-        "name": user.first_name,
+        "name": get_display_name(user),
+        "email": user.email,
     })
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def logout(request):
+    Token.objects.filter(user=request.user).delete()
+    return Response({"message": "Déconnexion réussie"})
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAuthenticated])
+def profile(request):
+    if request.method == "GET":
+        return Response({
+            "name": get_display_name(request.user),
+            "email": request.user.email,
+        })
+
+    name = (request.data.get("name") or request.user.first_name).strip()
+    email = (request.data.get("email") or request.user.email).strip().lower()
+
+    if not email:
+        return Response({"error": "Email est requis"}, status=400)
+    if len(email) > User._meta.get_field("username").max_length:
+        return Response({"error": "Adresse e-mail trop longue"}, status=400)
+    if len(name) > User._meta.get_field("first_name").max_length:
+        return Response({"error": "Nom trop long"}, status=400)
+    try:
+        validate_email(email)
+    except ValidationError:
+        return Response({"error": "Adresse e-mail invalide"}, status=400)
+    if User.objects.exclude(pk=request.user.pk).filter(email=email).exists():
+        return Response({"error": "Email déjà utilisé"}, status=400)
+    if User.objects.exclude(pk=request.user.pk).filter(username=email).exists():
+        return Response({"error": "Email déjà utilisé"}, status=400)
+
+    request.user.first_name = name
+    request.user.email = email
+    request.user.username = email
+    request.user.save(update_fields=["first_name", "email", "username"])
+    return Response({"name": name, "email": email})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    current_password = request.data.get("current_password")
+    new_password = request.data.get("new_password")
+
+    if not current_password or not new_password:
+        return Response({"error": "Les deux mots de passe sont requis"}, status=400)
+    if not request.user.check_password(current_password):
+        return Response({"error": "Mot de passe actuel incorrect"}, status=400)
+
+    try:
+        validate_password(new_password, user=request.user)
+    except ValidationError as exc:
+        return Response({"error": exc.messages}, status=400)
+
+    request.user.set_password(new_password)
+    request.user.save(update_fields=["password"])
+    Token.objects.filter(user=request.user).delete()
+    return Response({"message": "Mot de passe modifié. Reconnectez-vous."})
+
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def password_reset_request(request):
-    email = request.data.get("email")
+    email = (request.data.get("email") or "").strip().lower()
     if not email:
         return Response({"error": "Email est requis"}, status=400)
-    try:
-        user = User.objects.get(email=email)
-    except User.DoesNotExist:
-        return Response({"error": "Aucun utilisateur trouvé avec cet email"}, status=400)
+    user = User.objects.filter(email__iexact=email).first()
+    if user is None:
+        return Response({"message": "Si ce compte existe, un email a été envoyé."})
     uid = urlsafe_base64_encode(force_bytes(user.pk))
     token = default_token_generator.make_token(user)
     reset_link = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}/"
-    send_mail(
-        subject="Réinitialisation de votre mot de passe Memora",
-        message=(
-            f"Bonjour {user.first_name},\n\n"
-            f"Vous avez demandé une réinitialisation de mot de passe pour votre compte Memora.\n\n"
-            f"Cliquez sur ce lien pour réinitialiser votre mot de passe :\n"
-            f"{reset_link}\n\n"
-            f"Si vous n'êtes pas à l'origine de cette demande, ignorez ce message."
-        ),
-        from_email=settings.EMAIL_HOST_USER,
-        recipient_list=[user.email],
-        fail_silently=False,
-    )
+    try:
+        send_mail(
+            subject="Réinitialisation de votre mot de passe Memora",
+            message=(
+                f"Bonjour {get_display_name(user)},\n\n"
+                f"Vous avez demandé une réinitialisation de mot de passe pour votre compte Memora.\n\n"
+                f"Cliquez sur ce lien pour réinitialiser votre mot de passe :\n"
+                f"{reset_link}\n\n"
+                f"Si vous n'êtes pas à l'origine de cette demande, ignorez ce message."
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+    except Exception:
+        logger.exception("Password reset email failed")
+        return Response({"error": "Impossible d'envoyer l'email. Réessayez plus tard."}, status=503)
     return Response({
-        "message": "Un email de réinitialisation vous a été envoyé."
+        "message": "Si ce compte existe, un email a été envoyé."
     })
 @api_view(["POST"])
 @permission_classes([AllowAny])
@@ -157,7 +252,7 @@ def password_reset_confirm(request, uidb64, token):
     try:
         uid = force_str(urlsafe_base64_decode(uidb64))
         user = User.objects.get(pk=uid)
-    except Exception as e:
+    except Exception:
         return Response({"error": "Lien invalide"}, status=400)
     
     if not default_token_generator.check_token(user, token):

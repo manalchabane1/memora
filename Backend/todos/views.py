@@ -1,4 +1,3 @@
-from django.contrib.auth.models import User
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
@@ -12,18 +11,14 @@ def todo_list_create(request):
         todos = ToDo.objects.filter(
     user=request.user
 )
-        serializer = ToDoSerializer(todos, many=True)
+        serializer = ToDoSerializer(todos, many=True, context={"request": request})
         return Response(serializer.data)
 
     if request.method == "POST":
-        user = request.user
-
-        serializer = ToDoSerializer(
-            data={**request.data, "user": user.id}
-    )
+        serializer = ToDoSerializer(data=request.data, context={"request": request})
 
         if serializer.is_valid():
-            serializer.save()
+            serializer.save(user=request.user)
             return Response(serializer.data, status=201)
 
         return Response(serializer.errors, status=400)
@@ -40,7 +35,12 @@ def todo_detail(request, todo_id):
         return Response({"error": "Todo introuvable"}, status=404)
 
     if request.method == "PATCH":
-        serializer = ToDoSerializer(todo, data=request.data, partial=True)
+        serializer = ToDoSerializer(
+            todo,
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
 
         if serializer.is_valid():
             serializer.save()

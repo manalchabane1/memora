@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
 import { Link } from "react-router-dom";
 import dashboardImg from "../../assets/dashboard.png";
 import {
+  getCourses,
+  getDecks,
+  getQuizzes,
+  getRevisionSessions,
+  getTodos,
+} from "../../services/api";
+import {
   BookOpen,
   CalendarDays,
-  Flame,
-  Clock3,
   Target,
   Trophy,
   TrendingUp,
@@ -18,21 +22,18 @@ import {
 } from "lucide-react";
 
 import mascot from "/src/assets/mascot.png";
+import { getDisplayName } from "../../utils/profile";
 
 
 
 
 
-const sessions = [
-  {
-    id: 1,
-    title: "Révision IA",
-    subject: "Session Memora",
-    time: "Aujourd’hui",
-    color: "#8B6CF6",
-    short: "Me",
-  },
-];
+function localDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 function Dashboard() {
 
@@ -40,9 +41,12 @@ function Dashboard() {
   const [todos, setTodos] = useState([]);
   const [quizzes, setQuizzes] = useState([]);
   const [decks, setDecks] = useState([]);
-  const [userName, setUserName] = useState(
-  localStorage.getItem("name") || "Étudiant"
-);
+  const [sessions, setSessions] = useState([]);
+  const [profile, setProfile] = useState({
+    name: localStorage.getItem("name") || "",
+    email: localStorage.getItem("email") || "",
+  });
+  const userName = getDisplayName(profile.name, profile.email);
 
   const todayLabel = new Date().toLocaleDateString("fr-FR", {
     weekday: "long",
@@ -52,43 +56,43 @@ function Dashboard() {
     todayLabel.charAt(0).toUpperCase() + todayLabel.slice(1);
 
   useEffect(() => {
-    fetchDashboardData();
-    window.addEventListener("storage", () => {
-  setUserName(localStorage.getItem("name") || "Étudiant");
-});
+    async function loadDashboardData() {
+      try {
+        const [loadedCourses, loadedTodos, loadedQuizzes, loadedDecks, loadedSessions] = await Promise.all([
+          getCourses(),
+          getTodos(),
+          getQuizzes(),
+          getDecks(),
+          getRevisionSessions(),
+        ]);
+        setCourses(loadedCourses);
+        setTodos(loadedTodos);
+        setQuizzes(loadedQuizzes);
+        setDecks(loadedDecks);
+        setSessions(loadedSessions);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    const updateProfile = (event) => {
+      setProfile(event.detail || {
+        name: localStorage.getItem("name") || "",
+        email: localStorage.getItem("email") || "",
+      });
+    };
+    loadDashboardData();
+    window.addEventListener("profile-updated", updateProfile);
+    window.addEventListener("storage", updateProfile);
+    return () => {
+      window.removeEventListener("profile-updated", updateProfile);
+      window.removeEventListener("storage", updateProfile);
+    };
   }, []);
 
-  const fetchDashboardData = async () => {
-    try {
-
-      const token = localStorage.getItem("token");
-
-      const authConfig = {
-        headers: {
-          Authorization: `Token ${token}`,
-        },
-      };
-      const [
-        coursesRes,
-        todosRes,
-        quizzesRes,
-        decksRes,
-      ] = await Promise.all([
-        axios.get("http://127.0.0.1:8000/api/courses/", authConfig),
-        axios.get("http://127.0.0.1:8000/api/todos/", authConfig),
-        axios.get("http://127.0.0.1:8000/api/courses/quizzes/", authConfig),
-        axios.get("http://127.0.0.1:8000/api/courses/decks/", authConfig),
-      ]);
-
-      setCourses(coursesRes.data);
-      setTodos(todosRes.data);
-      setQuizzes(quizzesRes.data);
-      setDecks(decksRes.data);
-
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const todaySessions = sessions
+    .filter((session) => session.date === localDateKey(new Date()))
+    .sort((a, b) => a.start_time.localeCompare(b.start_time));
 
   return (
     <div className="p-8 max-w-[1500px] mx-auto">
@@ -135,7 +139,7 @@ function Dashboard() {
         <div className="absolute left-1/4 -bottom-20 w-72 h-72 bg-yellow-300/20 rounded-full blur-3xl" />
       </section>
 
-      <section className="grid grid-cols-4 gap-5 mt-6">
+      <section className="grid sm:grid-cols-2 xl:grid-cols-4 gap-5 mt-6">
         <StatCard
           icon={<BookOpen />}
           value={courses.length}
@@ -163,13 +167,13 @@ function Dashboard() {
         <StatCard
           icon={<Trophy />}
           value={decks.length}
-          label="Flashcards créées"
+          label="Decks de flashcards"
           trend="+"
           color="yellow"
         />
       </section>
 
-      <section className="grid grid-cols-[1.7fr_1fr] gap-6 mt-6">
+      <section className="grid xl:grid-cols-[1.7fr_1fr] gap-6 mt-6">
         <div className="bg-white rounded-[28px] border border-slate-100 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -178,7 +182,7 @@ function Dashboard() {
               </h2>
 
               <p className="text-slate-400 text-sm">
-                Session de révision recommandée
+                {todaySessions.length > 0 ? "Séances planifiées" : "Aucune séance planifiée"}
               </p>
             </div>
 
@@ -188,22 +192,28 @@ function Dashboard() {
           </div>
 
           <div className="space-y-3">
-            <SessionCard
-              session={{
-                title: "Révision du jour",
-                subject: `${courses.length} cours · ${quizzes.length} quiz disponibles`,
-                time: `${todos.filter((t) => t.status !== "done").length} tâches restantes`,
-                color: "#8B6CF6",
-                short: "Me",
-              }}
-            />
+            {todaySessions.length > 0 ? todaySessions.slice(0, 3).map((session) => (
+              <SessionCard
+                key={session.id}
+                session={{
+                  title: session.title,
+                  subject: session.location || "Révision",
+                  time: `${session.start_time.slice(0, 5)}–${session.end_time.slice(0, 5)}`,
+                  color: session.color || "#8B6CF6",
+                }}
+              />
+            )) : (
+              <p className="rounded-3xl border border-dashed border-slate-200 p-5 text-slate-400">
+                Ajoute une séance dans ton planning pour la retrouver ici.
+              </p>
+            )}
           </div>
         </div>
 
         <ProgressCard todos={todos} />
       </section>
 
-      <section className="grid grid-cols-[1.7fr_1fr] gap-6 mt-6">
+      <section className="grid xl:grid-cols-[1.7fr_1fr] gap-6 mt-6">
         <div className="bg-white rounded-[28px] border border-slate-100 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-extrabold">Reprendre un cours</h2>
@@ -212,14 +222,14 @@ function Dashboard() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid md:grid-cols-2 gap-4">
             {courses.slice(0, 4).map((course, index) => (
               <CourseCard
                 key={course.id}
                 course={{
                   title: course.title,
-                  subject: "Cours",
-                  progress: Math.floor(Math.random() * 60) + 30,
+                  subject: course.subject || "Cours",
+                  progress: course.summary ? 100 : 35,
                   color: ["#8B6CF6", "#60A5FA", "#34D399", "#FBBF24"][index % 4],
                   info: "Cours importé",
                 }}
@@ -237,7 +247,7 @@ function Dashboard() {
           </div>
 
           <div className="space-y-5">
-            {todos.slice(0, 3).map((todo, index) => (
+            {todos.filter((todo) => todo.status !== "done").slice(0, 3).map((todo, index) => (
               <TodoItem
                 key={todo.id}
                 todo={{
@@ -259,7 +269,7 @@ function Dashboard() {
         </div>
       </section>
 
-      <section className="grid grid-cols-4 gap-5 mt-6">
+      <section className="grid sm:grid-cols-2 xl:grid-cols-4 gap-5 mt-6">
         <QuickAction to="/courses" icon={<BookOpen />} label="Nouveau cours" color="#8B6CF6" />
         <QuickAction to="/flashcards" icon={<Plus />} label="Créer flashcards" color="#60A5FA" />
         <QuickAction to="/planning" icon={<CalendarDays />} label="Planifier session" color="#34D399" />

@@ -39,15 +39,21 @@ class DeckSerializer(serializers.ModelSerializer):
 
 
 class CoursePDFSerializer(serializers.ModelSerializer):
+    file_name = serializers.SerializerMethodField()
+
+    def get_file_name(self, obj):
+        return obj.file.name.rsplit("/", 1)[-1]
+
     class Meta:
         model = CoursePDF
-        fields = "__all__"
+        fields = ["id", "title", "subject", "file_name", "summary", "uploaded_at"]
+        read_only_fields = fields
 
 
 class QuizQuestionSerializer(serializers.ModelSerializer):
     class Meta:
         model = QuizQuestion
-        fields = "__all__"
+        fields = ["id", "question", "choices"]
 
 
 class QuizSerializer(serializers.ModelSerializer):
@@ -55,11 +61,12 @@ class QuizSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Quiz
-        fields = "__all__"
+        fields = ["id", "title", "subject", "deck", "course", "created_at", "quiz_questions"]
+        read_only_fields = fields
 
 
 class QuizAttemptSerializer(serializers.ModelSerializer):
     class Meta:
         model = QuizAttempt
         fields = "__all__"
-
+        read_only_fields = fields

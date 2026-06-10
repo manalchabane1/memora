@@ -26,31 +26,8 @@ const FILTERS = [
   { id: "done", label: "Terminées" },
 ];
 
-const initialTodos = [
-  {
-    id: 1,
-    title: "Finir DM de maths — exercices 12 à 18",
-    subject: "Mathématiques",
-    priority: "high",
-    due: "2026-05-09",
-    done: false,
-    color: "#8B6CF6",
-  },
-  {
-    id: 2,
-    title: "Apprendre 30 irregular verbs",
-    subject: "Anglais",
-    priority: "medium",
-    due: "2026-05-10",
-    done: false,
-    color: "#F472B6",
-  },
-];
-
-const subjectColors = ["#8B6CF6", "#60A5FA", "#34D399", "#FBBF24", "#F472B6"];
-
 function Todo() {
-  const [todos, setTodos] = useState(initialTodos);
+  const [todos, setTodos] = useState([]);
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
 
@@ -65,14 +42,13 @@ function Todo() {
     async function loadTodos() {
       try {
         const data = await getTodos();
-        setTodos(data);
         const formatted = data.map((t) => ({ 
           id: t.id,
           title: t.title,
-          subject: "Général",
+          subject: t.subject || "Général",
           priority: t.priority,
-          due: t.due,
-          done: t.done,
+          due: t.due_date || "",
+          done: t.status === "done",
           color:"#8B6CF6",
         }));
         setTodos(formatted);
@@ -119,6 +95,7 @@ function Todo() {
     const savedTodo = await createTodo({
       title: title.trim(),
       description: "",
+      subject: subject.trim() || "Général",
       status: "todo",
       due_date: due || null,
       priority,
@@ -183,6 +160,7 @@ function Todo() {
     try {
         const updated = await updateTodo(updatedTodo.id, {
             title: updatedTodo.title,
+            subject: updatedTodo.subject,
             priority: updatedTodo.priority,
             due_date: updatedTodo.due,
             status: updatedTodo.done ? "done" : "todo",
@@ -194,6 +172,7 @@ function Todo() {
                     ? {
                           ...todo,
                           title: updated.title,
+                          subject: updated.subject,
                           priority: updated.priority,
                           due: updated.due_date,
                           done: updated.status === "done",
@@ -374,7 +353,7 @@ function Todo() {
 }
 
 function TodoItem({ todo, onToggle, onDelete, onEdit }) {
-  const p = PRIORITIES[todo.priority];
+  const p = PRIORITIES[todo.priority] || PRIORITIES.medium;
 
   return (
     <div
@@ -408,7 +387,7 @@ function TodoItem({ todo, onToggle, onDelete, onEdit }) {
             {p.label}
           </span>
 
-          <span className="text-sm text-slate-400">· {todo.due}</span>
+          {todo.due && <span className="text-sm text-slate-400">· {todo.due}</span>}
         </div>
       </div>
 

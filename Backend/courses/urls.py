@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     get_courses,
+    download_course,
     get_decks,
     upload_course,
     delete_course,
@@ -22,6 +23,7 @@ urlpatterns = [
     path("", get_courses, name="get_courses"),
 
     path("upload/", upload_course, name="upload_course"),
+    path("<int:course_id>/file/", download_course, name="download_course"),
 
     path("decks/", get_decks, name="get_decks"),
 

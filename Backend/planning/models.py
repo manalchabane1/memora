@@ -20,6 +20,15 @@ class Availability(models.Model):
     start_time = models.TimeField()
     end_time = models.TimeField()
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='availabilities')
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(end_time__gt=models.F("start_time")),
+                name="availability_end_after_start",
+            )
+        ]
+
     def __str__(self):
         return f"{self.user.username} - {self.day}"
 
@@ -52,10 +61,20 @@ class RevisionSession(models.Model):
         start_time = models.TimeField()
         end_time = models.TimeField()
         status=models.CharField(max_length=20, choices=STATUS_CHOICES, default='planned')
+        title = models.CharField(max_length=255, default="Séance de révision")
+        description = models.TextField(blank=True)
+        location = models.CharField(max_length=255, blank=True)
+        color = models.CharField(max_length=20, default="#8B6CF6")
         revisionPlan = models.ForeignKey(RevisionPlan, on_delete=models.CASCADE, related_name='sessions')
         deck = models.ForeignKey(Deck, on_delete=models.CASCADE, related_name='revision_sessions')
 
+        class Meta:
+            constraints = [
+                models.CheckConstraint(
+                    condition=models.Q(end_time__gt=models.F("start_time")),
+                    name="revision_session_end_after_start",
+                )
+            ]
+
         def __str__(self):
             return f"{self.revisionPlan.user.username} - {self.date}"
-
-
