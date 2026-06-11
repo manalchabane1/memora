@@ -6,18 +6,16 @@ stages:
 pages:
   stage: deploy
   script:
-    - export FRONTEND_DIR="frontend"
-    - if [ -d "Frontend" ]; then export FRONTEND_DIR="Frontend"; fi
-    - cd "$FRONTEND_DIR"
+    - cd frontend
     - npm ci
     - npm run build
     - cd ..
     - rm -rf public
     - mkdir public
-    - cp -r "$FRONTEND_DIR"/dist/* public/
+    - cp -r frontend/dist/* public/
     - cp public/index.html public/404.html
   artifacts:
     paths:
       - public
-  only:
-    - main
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
