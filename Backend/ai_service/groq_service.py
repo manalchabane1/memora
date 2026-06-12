@@ -16,6 +16,8 @@ client = None
 logger = logging.getLogger(__name__)
 
 MODEL = "llama-3.1-8b-instant"
+JSON_RESPONSE_FORMAT = {"type": "json_object"}
+MAX_JSON_COMPLETION_TOKENS = 4096
 
 
 def get_client():
@@ -36,19 +38,51 @@ def extract_json_array(text):
     cleaned = cleaned.replace("```", "")
     cleaned = cleaned.strip()
 
-    match = re.search(r"\[.*\]", cleaned, re.DOTALL)
-
-    if not match:
-        logger.warning("No JSON array found in AI response")
-        return []
-
-    json_text = match.group(0)
-
     try:
-        return json.loads(json_text)
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, dict):
+            for key in ("items", "flashcards", "questions", "sessions"):
+                value = parsed.get(key)
+                if isinstance(value, list):
+                    return value
     except json.JSONDecodeError as e:
         logger.warning("Could not parse AI response as JSON: %s", e)
-        return []
+
+    match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+    if match:
+        try:
+            parsed = json.loads(match.group(0))
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    recovered = recover_json_objects(cleaned)
+    if recovered:
+        logger.warning("Recovered %s complete object(s) from malformed AI JSON", len(recovered))
+        return recovered
+
+    logger.warning("No usable JSON items found in AI response")
+    return []
+
+
+def recover_json_objects(text):
+    decoder = json.JSONDecoder()
+    recovered = []
+
+    for index, character in enumerate(text):
+        if character != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and value:
+            recovered.append(value)
+
+    return recovered
 
 
 def normalize_text(value):
@@ -62,28 +96,56 @@ def has_duplicate_choices(choices):
     return len(normalized) != len(set(normalized))
 
 
-def generate_flashcards_with_groq(text):
+def match_correct_answer(value, choices):
+    answer = normalize_text(value)
+    if not answer:
+        return ""
+    if answer in choices:
+        return answer
+
+    case_insensitive = {choice.lower(): choice for choice in choices}
+    if answer.lower() in case_insensitive:
+        return case_insensitive[answer.lower()]
+
+    letter_match = re.match(r"^([A-D])(?:[\s).:\-]|$)", answer, re.IGNORECASE)
+    if letter_match:
+        return choices[ord(letter_match.group(1).upper()) - ord("A")]
+
+    return ""
+
+
+def generate_flashcards_with_groq(text, count=10, difficulty="all", focus=""):
+    difficulty_instruction = (
+        "répartis les difficultés entre easy, medium et hard"
+        if difficulty == "all"
+        else f"toutes les cartes doivent avoir la difficulté {difficulty}"
+    )
+    focus_instruction = focus or "les notions les plus importantes du cours"
     prompt = f"""
 Tu es un assistant pédagogique expert en création de supports de révision.
 
-À partir du cours fourni, génère EXACTEMENT 10 flashcards utiles pour réviser.
+À partir du cours fourni, génère EXACTEMENT {count} flashcards utiles pour réviser.
 
-Réponds uniquement avec un tableau JSON valide.
+Réponds uniquement avec un objet JSON valide contenant la clé "items".
 Ne mets aucun texte avant ou après le JSON.
 Ne mets pas de markdown.
 Ne mets pas de ```.
 
 Format obligatoire:
-[
+{{
+  "items": [
   {{
     "question": "question claire et utile",
     "answer": "réponse courte, précise et correcte",
     "difficulty": "easy"
   }}
-]
+  ]
+}}
 
 Contraintes:
 - difficulty doit être exactement: easy, medium ou hard
+- {difficulty_instruction}
+- concentre-toi sur: {focus_instruction}
 - réponds uniquement en français
 - privilégie les notions importantes: définitions, théorèmes, méthodes, mécanismes, concepts
 - évite les détails administratifs: nom du prof, horaires, modalités d'évaluation, liens, bibliographie
@@ -101,7 +163,7 @@ Cours:
         messages=[
             {
                 "role": "system",
-                "content": "Tu réponds uniquement avec un tableau JSON valide, sans markdown."
+                "content": "Tu réponds uniquement avec un objet JSON valide contenant la clé items, sans markdown."
             },
             {
                 "role": "user",
@@ -109,6 +171,8 @@ Cours:
             },
         ],
         temperature=0.1,
+        response_format=JSON_RESPONSE_FORMAT,
+        max_completion_tokens=MAX_JSON_COMPLETION_TOKENS,
     )
 
     content = response.choices[0].message.content
@@ -118,6 +182,8 @@ Cours:
     seen_questions = set()
 
     for card in cards:
+        if not isinstance(card, dict):
+            continue
         question = normalize_text(card.get("question"))
         answer = normalize_text(card.get("answer"))
         difficulty = normalize_text(card.get("difficulty", "medium")).lower()
@@ -144,7 +210,8 @@ Cours:
     return valid_cards
 
 
-def generate_summary_with_groq(text):
+def generate_summary_with_groq(text, line_count=20, instructions=""):
+    focus_instruction = instructions or "les notions les plus importantes du cours"
     prompt = f"""
 Tu es un assistant pédagogique expert en synthèse de cours.
 
@@ -158,6 +225,8 @@ Contraintes:
 - mets en avant les définitions, théorèmes, méthodes, concepts importants
 - ajoute une courte partie "À retenir" à la fin
 - écris simplement, comme une fiche de révision
+- vise environ {line_count} lignes
+- consigne particulière: {focus_instruction}
 
 Cours:
 {text[:10000]}
@@ -181,26 +250,29 @@ Cours:
     return response.choices[0].message.content.strip()
 
 
-def generate_quiz_with_groq(flashcards):
+def generate_quiz_with_groq(flashcards, count=10, difficulty="medium", instructions=""):
+    focus_instruction = instructions or "les notions les plus importantes"
     prompt = f"""
 Tu es un assistant pédagogique expert en création de QCM de révision.
 
-À partir des flashcards suivantes, génère EXACTEMENT 10 questions de quiz QCM.
+À partir des flashcards suivantes, génère EXACTEMENT {count} questions de quiz QCM.
 
-Réponds uniquement avec un tableau JSON valide.
+Réponds uniquement avec un objet JSON valide contenant la clé "items".
 Ne mets aucun texte avant ou après le JSON.
 Ne mets pas de markdown.
 Ne mets pas de ```.
 
 Format obligatoire:
-[
+{{
+  "items": [
   {{
     "question": "question claire",
     "choices": ["choix A", "choix B", "choix C", "choix D"],
     "correct_answer": "choix A",
     "explanation": "explication courte"
   }}
-]
+  ]
+}}
 
 Contraintes strictes:
 - réponds uniquement en français
@@ -215,6 +287,8 @@ Contraintes strictes:
 - varie la position de la bonne réponse: parfois A, parfois B, parfois C, parfois D
 - l'explication doit justifier brièvement pourquoi la bonne réponse est correcte
 - aucun champ supplémentaire
+- niveau attendu: {difficulty}
+- consigne particulière: {focus_instruction}
 
 Flashcards:
 {json.dumps(flashcards, ensure_ascii=False)}
@@ -225,7 +299,7 @@ Flashcards:
         messages=[
             {
                 "role": "system",
-                "content": "Tu réponds uniquement avec un tableau JSON valide. Aucun markdown."
+                "content": "Tu réponds uniquement avec un objet JSON valide contenant la clé items. Aucun markdown."
             },
             {
                 "role": "user",
@@ -233,6 +307,8 @@ Flashcards:
             },
         ],
         temperature=0.1,
+        response_format=JSON_RESPONSE_FORMAT,
+        max_completion_tokens=MAX_JSON_COMPLETION_TOKENS,
     )
 
     content = response.choices[0].message.content
@@ -242,12 +318,14 @@ Flashcards:
     seen_questions = set()
 
     for question in questions:
+        if not isinstance(question, dict):
+            continue
         q_text = normalize_text(question.get("question"))
         choices = question.get("choices")
-        correct_answer = normalize_text(question.get("correct_answer"))
+        raw_correct_answer = question.get("correct_answer")
         explanation = normalize_text(question.get("explanation", ""))
 
-        if not q_text or not choices or not correct_answer:
+        if not q_text or not choices or not raw_correct_answer:
             continue
 
         if not isinstance(choices, list):
@@ -264,7 +342,8 @@ Flashcards:
         if has_duplicate_choices(choices):
             continue
 
-        if correct_answer not in choices:
+        correct_answer = match_correct_answer(raw_correct_answer, choices)
+        if not correct_answer:
             continue
 
         q_key = q_text.lower()
@@ -281,29 +360,32 @@ Flashcards:
             "explanation": explanation,
         })
 
-    return valid_questions
+    return valid_questions[:count]
 
 
-def generate_personal_quiz_with_groq(topic):
+def generate_personal_quiz_with_groq(topic, count=10, difficulty="medium", instructions=""):
+    focus_instruction = instructions or "couvrir les notions principales"
     prompt = f"""
 Tu es un assistant pédagogique expert en création de QCM.
 
-Génère EXACTEMENT 10 questions de quiz QCM sur le sujet suivant.
+Génère EXACTEMENT {count} questions de quiz QCM sur le sujet suivant.
 
-Réponds uniquement avec un tableau JSON valide.
+Réponds uniquement avec un objet JSON valide contenant la clé "items".
 Ne mets aucun texte avant ou après le JSON.
 Ne mets pas de markdown.
 Ne mets pas de ```.
 
 Format obligatoire:
-[
+{{
+  "items": [
   {{
     "question": "question claire",
     "choices": ["choix A", "choix B", "choix C", "choix D"],
     "correct_answer": "choix A",
     "explanation": "explication courte"
   }}
-]
+  ]
+}}
 
 Contraintes:
 - réponds uniquement en français
@@ -313,6 +395,8 @@ Contraintes:
 - les mauvais choix doivent être plausibles mais clairement faux
 - varie la position de la bonne réponse
 - aucun champ supplémentaire
+- niveau attendu: {difficulty}
+- consigne particulière: {focus_instruction}
 
 Sujet:
 {topic}
@@ -323,7 +407,7 @@ Sujet:
         messages=[
             {
                 "role": "system",
-                "content": "Tu réponds uniquement avec un tableau JSON valide. Aucun markdown."
+                "content": "Tu réponds uniquement avec un objet JSON valide contenant la clé items. Aucun markdown."
             },
             {
                 "role": "user",
@@ -331,20 +415,25 @@ Sujet:
             },
         ],
         temperature=0.1,
+        response_format=JSON_RESPONSE_FORMAT,
+        max_completion_tokens=MAX_JSON_COMPLETION_TOKENS,
     )
 
     content = response.choices[0].message.content
     questions = extract_json_array(content)
 
     valid_questions = []
+    seen_questions = set()
 
     for question in questions:
+        if not isinstance(question, dict):
+            continue
         q_text = normalize_text(question.get("question"))
         choices = question.get("choices")
-        correct_answer = normalize_text(question.get("correct_answer"))
+        raw_correct_answer = question.get("correct_answer")
         explanation = normalize_text(question.get("explanation", ""))
 
-        if not q_text or not choices or not correct_answer:
+        if not q_text or not choices or not raw_correct_answer:
             continue
 
         if not isinstance(choices, list):
@@ -361,8 +450,14 @@ Sujet:
         if has_duplicate_choices(choices):
             continue
 
-        if correct_answer not in choices:
+        correct_answer = match_correct_answer(raw_correct_answer, choices)
+        if not correct_answer:
             continue
+
+        q_key = q_text.lower()
+        if q_key in seen_questions:
+            continue
+        seen_questions.add(q_key)
 
         valid_questions.append({
             "question": q_text,
@@ -371,7 +466,7 @@ Sujet:
             "explanation": explanation,
         })
 
-    return valid_questions
+    return valid_questions[:count]
 
 
 def ask_pdf_with_groq(text, question):
@@ -486,6 +581,8 @@ Flashcards:
     valid_priorities = ["low", "medium", "high"]
 
     for session in sessions:
+        if not isinstance(session, dict):
+            continue
         day = normalize_text(session.get("day"))
         start_time = normalize_text(session.get("start_time"))
         end_time = normalize_text(session.get("end_time"))

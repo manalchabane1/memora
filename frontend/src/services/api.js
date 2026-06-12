@@ -12,7 +12,9 @@ function getAuthHeaders() {
 async function handleResponse(response, errorMessage) {
   if (response.status === 401) {
     localStorage.removeItem("token");
-    window.dispatchEvent(new Event("auth-expired"));
+    window.dispatchEvent(new CustomEvent("auth-expired", {
+      detail: { message: "Ta session a expiré. Reconnecte-toi pour retrouver tes pages." },
+    }));
   }
 
   if (!response.ok) {
@@ -78,6 +80,17 @@ export function getProfile() {
 }
 
 export function updateProfile(data) {
+  if (data.avatar instanceof File) {
+    const formData = new FormData();
+    Object.entries(data).forEach(([key, value]) => {
+      formData.append(key, Array.isArray(value) ? value.join(",") : value);
+    });
+    return apiFetch(
+      "/auth/profile/",
+      { method: "PATCH", body: formData },
+      "Erreur modification profil"
+    );
+  }
   return apiFetch("/auth/profile/", jsonOptions("PATCH", data), "Erreur modification profil");
 }
 
@@ -144,18 +157,18 @@ export function deleteDeck(id) {
   );
 }
 
-export function generateFlashcardsFromCourse(courseId) {
+export function generateFlashcardsFromCourse(courseId, options = {}) {
   return apiFetch(
     `/courses/${courseId}/generate-flashcards/`,
-    { method: "POST" },
+    jsonOptions("POST", options),
     "Erreur génération flashcards"
   );
 }
 
-export function generateSummaryFromCourse(courseId) {
+export function generateSummaryFromCourse(courseId, options = {}) {
   return apiFetch(
     `/courses/${courseId}/generate-summary/`,
-    { method: "POST" },
+    jsonOptions("POST", options),
     "Erreur génération résumé"
   );
 }
@@ -172,18 +185,18 @@ export function getQuizzes() {
   return apiFetch("/courses/quizzes/", {}, "Erreur chargement quiz");
 }
 
-export function generateQuizFromDeck(deckId) {
+export function generateQuizFromDeck(deckId, options = {}) {
   return apiFetch(
     `/courses/decks/${deckId}/generate-quiz/`,
-    { method: "POST" },
+    jsonOptions("POST", options),
     "Erreur génération quiz"
   );
 }
 
-export function generatePersonalQuiz(topic) {
+export function generatePersonalQuiz(topic, options = {}) {
   return apiFetch(
     "/courses/generate-personal-quiz/",
-    jsonOptions("POST", { topic }),
+    jsonOptions("POST", { topic, ...options }),
     "Erreur génération quiz"
   );
 }
@@ -193,6 +206,14 @@ export function submitQuiz(quizId, answers) {
     `/courses/quizzes/${quizId}/submit/`,
     jsonOptions("POST", { answers }),
     "Erreur correction quiz"
+  );
+}
+
+export function checkQuizAnswer(quizId, questionId, answer) {
+  return apiFetch(
+    `/courses/quizzes/${quizId}/questions/${questionId}/check/`,
+    jsonOptions("POST", { answer }),
+    "Erreur de vérification de la réponse"
   );
 }
 

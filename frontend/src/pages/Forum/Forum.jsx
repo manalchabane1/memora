@@ -7,6 +7,7 @@ import {
   getForumComments,
   createForumComment,
 } from "../../services/api";
+import { MemiGuide } from "../../components/AnimatedMemi";
 
 const categories = [
   { value: "general", label: "Général" },
@@ -129,7 +130,17 @@ async function handleCreateComment(e, postId) {
 }
 
   useEffect(() => {
-    loadPosts();
+    let active = true;
+    getForumPosts()
+      .then((data) => {
+        if (active) setPosts(data);
+      })
+      .catch((error) => {
+        console.error("Erreur forum:", error);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   return (
@@ -157,6 +168,15 @@ async function handleCreateComment(e, postId) {
           Actualiser
         </button>
       </header>
+
+      <MemiGuide
+        mood="social"
+        eyebrow="Communauté Memora"
+        title="Pose des questions et aide les autres à apprendre."
+        message="Partage une difficulté, une méthode ou une explication utile avec les autres étudiants."
+        compact
+        className="mb-6"
+      />
 
       <div className="grid lg:grid-cols-[420px_1fr] gap-6">
         <form

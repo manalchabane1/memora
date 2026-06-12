@@ -1,4 +1,5 @@
 import logging
+import math
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -34,6 +35,116 @@ from ai_service.groq_service import (
 
 MAX_PDF_SIZE = 20 * 1024 * 1024
 logger = logging.getLogger(__name__)
+GENERATION_BATCH_SIZE = 8
+
+
+def parse_generation_options(request, count_key, default_count, minimum, maximum):
+    try:
+        count = int(request.data.get(count_key, default_count))
+    except (TypeError, ValueError):
+        return None, Response({"error": f"{count_key} doit être un nombre"}, status=400)
+    if not minimum <= count <= maximum:
+        return None, Response(
+            {"error": f"{count_key} doit être compris entre {minimum} et {maximum}"},
+            status=400,
+        )
+
+    difficulty_value = request.data.get("difficulty") or "all"
+    if not isinstance(difficulty_value, str):
+        return None, Response({"error": "Difficulté invalide"}, status=400)
+    difficulty = difficulty_value.strip().lower()
+    if difficulty not in {"all", "easy", "medium", "hard"}:
+        return None, Response({"error": "Difficulté invalide"}, status=400)
+
+    instructions_value = request.data.get("instructions") or request.data.get("focus") or ""
+    if not isinstance(instructions_value, str):
+        return None, Response({"error": "La consigne doit être du texte"}, status=400)
+    instructions = instructions_value.strip()
+    if len(instructions) > 500:
+        return None, Response({"error": "La consigne est trop longue"}, status=400)
+
+    return {
+        "count": count,
+        "difficulty": difficulty,
+        "instructions": instructions,
+    }, None
+
+
+def generate_complete_set(generator, source, count, max_attempts=None, **options):
+    generated = []
+    seen_questions = set()
+    if max_attempts is None:
+        max_attempts = math.ceil(count / GENERATION_BATCH_SIZE) + 3
+
+    for _ in range(max_attempts):
+        remaining = count - len(generated)
+        if remaining <= 0:
+            break
+        attempt_options = options.copy()
+        if generated:
+            previous_questions = "; ".join(
+                item["question"] for item in generated[-10:]
+            )
+            base_instructions = attempt_options.get("instructions") or ""
+            attempt_options["instructions"] = (
+                f"{base_instructions} Évite absolument ces questions déjà générées : "
+                f"{previous_questions}"
+            ).strip()
+        batch = generator(
+            source,
+            count=min(remaining, GENERATION_BATCH_SIZE),
+            **attempt_options,
+        )
+        for item in batch or []:
+            if not isinstance(item, dict):
+                continue
+            question = (item.get("question") or "").strip()
+            question_key = question.lower()
+            if question_key and question_key not in seen_questions:
+                seen_questions.add(question_key)
+                generated.append(item)
+
+    return generated[:count]
+
+
+def build_quiz_fallbacks(flashcards, existing_questions, count):
+    used_questions = {
+        (item.get("question") or "").strip().lower()
+        for item in existing_questions
+        if isinstance(item, dict)
+    }
+    answers = []
+    for card in flashcards:
+        answer = (card.get("answer") or "").strip()
+        if answer and answer not in answers:
+            answers.append(answer)
+
+    if len(answers) < 4:
+        return []
+
+    fallbacks = []
+    for index, card in enumerate(flashcards):
+        question = (card.get("question") or "").strip()
+        correct_answer = (card.get("answer") or "").strip()
+        if not question or not correct_answer or question.lower() in used_questions:
+            continue
+
+        distractors = [answer for answer in answers if answer != correct_answer][:3]
+        if len(distractors) < 3:
+            continue
+        choices = distractors.copy()
+        choices.insert(index % 4, correct_answer)
+        fallbacks.append({
+            "question": question,
+            "choices": choices,
+            "correct_answer": correct_answer,
+            "explanation": correct_answer,
+        })
+        used_questions.add(question.lower())
+        if len(existing_questions) + len(fallbacks) >= count:
+            break
+
+    return fallbacks
 
 
 def validate_pdf_upload(file):
@@ -70,8 +181,12 @@ def download_course(request, course_id):
 def upload_course(request):
     user = request.user
 
-    title = (request.data.get("title") or "Nouveau cours").strip()
-    subject = (request.data.get("subject") or "Général").strip()
+    title_value = request.data.get("title") or "Nouveau cours"
+    subject_value = request.data.get("subject") or "Général"
+    if not isinstance(title_value, str) or not isinstance(subject_value, str):
+        return Response({"error": "Le titre et la matière doivent être du texte"}, status=400)
+    title = title_value.strip()
+    subject = subject_value.strip()
     file = request.FILES.get("file")
 
     if not file:
@@ -107,20 +222,11 @@ def get_decks(request):
 
 @api_view(["POST"])
 def generate_flashcards_from_course(request, course_id):
+    options, error = parse_generation_options(request, "count", 10, 5, 40)
+    if error:
+        return error
     try:
         course = CoursePDF.objects.get(id=course_id, user=request.user)
-        existing_deck = Deck.objects.filter(
-    CoursePDF=course,
-    user=request.user
-).first()
-
-        if existing_deck:
-            return Response({
-                "already_exists": True,
-                "deck_id": existing_deck.id,
-                "message": "Flashcards déjà générées."
-        })
-
     except CoursePDF.DoesNotExist:
         return Response({"error": "Cours introuvable"}, status=404)
 
@@ -138,17 +244,25 @@ def generate_flashcards_from_course(request, course_id):
         }, status=400)
 
     try:
-        generated_cards = generate_flashcards_pipeline(text)
+        generated_cards = generate_flashcards_pipeline(
+            text,
+            count=options["count"],
+            difficulty=options["difficulty"],
+            focus=options["instructions"],
+        )
     except Exception as e:
         logger.exception("Flashcard generation failed for course %s", course.id)
         return Response({
             "error": "Erreur pendant la génération des flashcards",
         }, status=500)
 
-    if not generated_cards:
+    if len(generated_cards) != options["count"]:
         return Response({
-            "error": "Aucune flashcard générée"
-        }, status=400)
+            "error": (
+                f"L'IA a généré {len(generated_cards)} flashcard(s) sur "
+                f"{options['count']}. Réessaie pour obtenir le nombre demandé."
+            )
+        }, status=502)
 
     with transaction.atomic():
         deck, created = Deck.objects.get_or_create(
@@ -187,7 +301,10 @@ def delete_course(request, course_id):
     if request.method == "PATCH":
         changed_fields = []
         if "title" in request.data:
-            title = (request.data.get("title") or "").strip()
+            title_value = request.data.get("title") or ""
+            if not isinstance(title_value, str):
+                return Response({"error": "Le titre doit être du texte"}, status=400)
+            title = title_value.strip()
             if not title or len(title) > 255:
                 return Response(
                     {"error": "Le titre doit contenir entre 1 et 255 caractères"},
@@ -196,7 +313,10 @@ def delete_course(request, course_id):
             course.title = title
             changed_fields.append("title")
         if "subject" in request.data:
-            subject = (request.data.get("subject") or "").strip()
+            subject_value = request.data.get("subject") or ""
+            if not isinstance(subject_value, str):
+                return Response({"error": "La matière doit être du texte"}, status=400)
+            subject = subject_value.strip()
             if not subject or len(subject) > 100:
                 return Response(
                     {"error": "La matière doit contenir entre 1 et 100 caractères"},
@@ -217,6 +337,19 @@ def delete_course(request, course_id):
 @api_view(["POST"])
 def generate_summary_from_course(request, course_id):
     try:
+        line_count = int(request.data.get("line_count", 20))
+    except (TypeError, ValueError):
+        return Response({"error": "line_count doit être un nombre"}, status=400)
+    if not 5 <= line_count <= 100:
+        return Response({"error": "line_count doit être compris entre 5 et 100"}, status=400)
+    instructions_value = request.data.get("instructions") or ""
+    if not isinstance(instructions_value, str):
+        return Response({"error": "La consigne doit être du texte"}, status=400)
+    instructions = instructions_value.strip()
+    if len(instructions) > 500:
+        return Response({"error": "La consigne est trop longue"}, status=400)
+
+    try:
         course = CoursePDF.objects.get(id=course_id,user=request.user)
     except CoursePDF.DoesNotExist:
         return Response({"error": "Cours introuvable"}, status=404)
@@ -235,13 +368,24 @@ def generate_summary_from_course(request, course_id):
         }, status=400)
 
     try:
-        summary = generate_summary_with_groq(text)
+        summary = generate_summary_with_groq(
+            text,
+            line_count=line_count,
+            instructions=instructions,
+        )
     except Exception as e:
         logger.exception("Summary generation failed for course %s", course.id)
         return Response({
             "error": "Erreur pendant la génération du résumé",
         }, status=500)
 
+    if not isinstance(summary, str) or not summary.strip():
+        return Response(
+            {"error": "L'IA n'a pas généré de résumé utilisable. Réessaie plus tard."},
+            status=502,
+        )
+
+    summary = summary.strip()
     course.summary = summary
     course.save(update_fields=["summary"])
 
@@ -257,7 +401,10 @@ def generate_summary_from_course(request, course_id):
 def ask_question_from_course(request, course_id):
     question = request.data.get("question", "")
 
-    if not question.strip():
+    if not isinstance(question, str):
+        return Response({"error": "La question doit être du texte"}, status=400)
+    question = question.strip()
+    if not question:
         return Response({"error": "Question vide"}, status=400)
     if len(question) > 2000:
         return Response({"error": "Question trop longue"}, status=400)
@@ -308,22 +455,39 @@ def delete_deck(request, deck_id):
 @api_view(["POST"])
 def generate_personal_quiz(request):
     topic = request.data.get("topic", "")
+    options, error = parse_generation_options(request, "count", 10, 5, 30)
+    if error:
+        return error
 
-    if not topic.strip():
+    if not isinstance(topic, str):
+        return Response({"error": "Le sujet doit être du texte"}, status=400)
+    topic = topic.strip()
+    if not topic:
         return Response({"error": "Sujet vide"}, status=400)
     if len(topic) > 255:
         return Response({"error": "Sujet trop long"}, status=400)
 
     try:
-        generated_questions = generate_personal_quiz_with_groq(topic)
+        generated_questions = generate_complete_set(
+            generate_personal_quiz_with_groq,
+            topic,
+            count=options["count"],
+            difficulty=options["difficulty"],
+            instructions=options["instructions"],
+        )
     except Exception as e:
         logger.exception("Personal quiz generation failed")
         return Response({
             "error": "Erreur pendant la génération du quiz",
         }, status=500)
 
-    if not generated_questions:
-        return Response({"error": "Aucune question générée"}, status=400)
+    if len(generated_questions) != options["count"]:
+        return Response({
+            "error": (
+                f"L'IA a généré {len(generated_questions)} question(s) sur "
+                f"{options['count']}. Réessaie pour obtenir le nombre demandé."
+            )
+        }, status=502)
 
     with transaction.atomic():
         quiz = Quiz.objects.create(
@@ -367,6 +531,9 @@ def delete_quiz(request,quiz_id):
 
 @api_view(["POST"])
 def generate_quiz_from_deck(request, deck_id):
+    options, error = parse_generation_options(request, "count", 10, 5, 30)
+    if error:
+        return error
     try:
         deck = Deck.objects.get(
     id=deck_id,
@@ -380,14 +547,6 @@ def generate_quiz_from_deck(request, deck_id):
     if not flashcards.exists():
         return Response({"error": "Aucune flashcard trouvée pour ce deck"}, status=400)
 
-    existing_quiz = Quiz.objects.filter(deck=deck, user=request.user).first()
-    if existing_quiz:
-        return Response({
-            "already_exists": True,
-            "message": "Quiz déjà généré.",
-            **QuizSerializer(existing_quiz).data,
-        })
-
     flashcards_data = [
         {
             "question": card.question,
@@ -398,15 +557,37 @@ def generate_quiz_from_deck(request, deck_id):
     ]
 
     try:
-        generated_questions = generate_quiz_with_groq(flashcards_data)
+        generated_questions = generate_complete_set(
+            generate_quiz_with_groq,
+            flashcards_data,
+            count=options["count"],
+            max_attempts=2,
+            difficulty=options["difficulty"],
+            instructions=options["instructions"],
+        )
     except Exception as e:
         logger.exception("Quiz generation failed for deck %s", deck.id)
         return Response({
             "error": "Erreur pendant la génération du quiz",
         }, status=500)
 
-    if not generated_questions:
-        return Response({"error": "Aucune question générée"}, status=400)
+    if len(generated_questions) < options["count"]:
+        generated_questions.extend(
+            build_quiz_fallbacks(
+                flashcards_data,
+                generated_questions,
+                options["count"],
+            )
+        )
+
+    if len(generated_questions) != options["count"]:
+        return Response({
+            "error": (
+                f"L'IA a généré {len(generated_questions)} question(s) sur "
+                f"{options['count']}. Ce deck ne contient pas assez de notions distinctes "
+                "pour compléter le quiz."
+            )
+        }, status=502)
 
     with transaction.atomic():
         quiz = Quiz.objects.create(
@@ -428,6 +609,25 @@ def generate_quiz_from_deck(request, deck_id):
     serializer = QuizSerializer(quiz)
 
     return Response(serializer.data, status=201)
+
+
+@api_view(["POST"])
+def check_quiz_answer(request, quiz_id, question_id):
+    question = get_object_or_404(
+        QuizQuestion,
+        id=question_id,
+        quiz_id=quiz_id,
+        quiz__user=request.user,
+    )
+    answer = request.data.get("answer")
+    if answer not in question.choices:
+        return Response({"error": "Réponse invalide"}, status=400)
+
+    return Response({
+        "is_correct": answer == question.correct_answer,
+        "correct_answer": question.correct_answer,
+        "explanation": question.explanation,
+    })
 
 
 @api_view(["POST"])

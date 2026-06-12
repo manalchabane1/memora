@@ -14,6 +14,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import { MemiGuide } from "../../components/AnimatedMemi";
 
 const initialSubjects = [];
 const initialCourses = [];
@@ -32,6 +33,7 @@ function Courses() {
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [loadingFlashcards, setLoadingFlashcards] = useState(false);
   const [flashcardsReady, setFlashcardsReady] = useState(false);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
  
 
   useEffect(() => {
@@ -96,6 +98,7 @@ function Courses() {
   }
 
   try {
+    setUploadingPdf(true);
     for (const file of pdfs) {
       const savedCourse = await uploadCoursePDF(file);
 
@@ -119,20 +122,22 @@ function Courses() {
       ]);
     }
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
   } catch (error) {
     console.error(error);
     alert(error.message);
+  } finally {
+    setUploadingPdf(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   }
 };
 
-  const generateSummary = async (courseId) => {
+  const generateSummary = async (courseId, options) => {
   try {
     setLoadingSummary(true);
 
-    const result = await generateSummaryFromCourse(courseId);
+    const result = await generateSummaryFromCourse(courseId, options);
 
     if (!result.summary || result.summary.trim() === "") {
       alert("Le résumé n'a pas été généré.");
@@ -155,23 +160,20 @@ function Courses() {
     }
   } catch (error) {
     console.error(error);
-    alert("Erreur pendant la génération du résumé.");
+    alert(error.message);
   } finally {
     setLoadingSummary(false);
   }
 };
 
-const generateFlashcards = async (courseId) => {
+const generateFlashcards = async (courseId, options) => {
   try {
     setLoadingFlashcards(true);
-    const result = await generateFlashcardsFromCourse(courseId);
-    if (result.already_exists) {
-  alert("Flashcards déjà générées pour ce cours.");
-}
+    await generateFlashcardsFromCourse(courseId, options);
     setFlashcardsReady(true);
   } catch (error) {
     console.error("Erreur génération flashcards :", error);
-    alert("Erreur pendant la génération des flashcards.");
+    alert(error.message);
   }finally {
     setLoadingFlashcards(false);
   }
@@ -297,6 +299,17 @@ const addSubject = () => {
           </div>
         </div>
       </header>
+
+      {uploadingPdf && (
+        <MemiGuide
+          mood="working"
+          eyebrow="Import du cours"
+          title="Je lis ton document..."
+          message="Je vérifie le PDF et prépare ton cours pour les prochaines générations."
+          compact
+          className="mb-6"
+        />
+      )}
 
       <section
         onClick={openFilePicker}
@@ -576,6 +589,11 @@ function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGener
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [pdfUrl, setPdfUrl] = useState("");
+  const [flashcardCount, setFlashcardCount] = useState(10);
+  const [flashcardDifficulty, setFlashcardDifficulty] = useState("all");
+  const [flashcardFocus, setFlashcardFocus] = useState("");
+  const [summaryLines, setSummaryLines] = useState(20);
+  const [summaryInstructions, setSummaryInstructions] = useState("");
 
   useEffect(() => {
     let objectUrl = "";
@@ -689,20 +707,54 @@ function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGener
         </div>
 
         <div className="p-8">
+          {(loadingFlashcards || loadingSummary) && (
+            <MemiGuide
+              mood={loadingSummary ? "thinking" : "working"}
+              eyebrow="Memi travaille"
+              title={loadingSummary ? "J’analyse ton document..." : "Je crée tes flashcards..."}
+              message={loadingSummary ? "Je repère les idées importantes et prépare une synthèse claire." : "Je transforme les notions clés en cartes faciles à réviser."}
+              compact
+              className="mb-5"
+            />
+          )}
           <div className="grid gap-3 mb-6">
-  <select
+	  <select
     value={course.subjectId}
     onChange={(e) => onAssignSubject(course.id, e.target.value)}
     className="w-full h-12 rounded-2xl border border-slate-200 px-4 font-bold"
   >
     {subjects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-  </select>
+	  </select>
+
+  <div className="rounded-2xl bg-[#F8F5FF] p-4 grid gap-3">
+    <p className="text-sm font-extrabold text-[#8B6CF6]">Options des flashcards</p>
+    <div className="grid grid-cols-2 gap-3">
+      <label className="text-xs font-bold text-slate-500">
+        Nombre
+        <input type="number" min="5" max="40" value={flashcardCount} onChange={(e) => setFlashcardCount(Math.min(40, Math.max(5, Number(e.target.value) || 5)))} className="mt-1 w-full h-10 rounded-xl border border-slate-200 px-3 bg-white" />
+      </label>
+      <label className="text-xs font-bold text-slate-500">
+        Difficulté
+        <select value={flashcardDifficulty} onChange={(e) => setFlashcardDifficulty(e.target.value)} className="mt-1 w-full h-10 rounded-xl border border-slate-200 px-3 bg-white">
+          <option value="all">Mixte</option>
+          <option value="easy">Facile</option>
+          <option value="medium">Moyenne</option>
+          <option value="hard">Difficile</option>
+        </select>
+      </label>
+    </div>
+    <input value={flashcardFocus} onChange={(e) => setFlashcardFocus(e.target.value)} maxLength={500} placeholder="Focus : définitions, formules, chapitre..." className="h-10 rounded-xl border border-slate-200 px-3 bg-white text-sm" />
+  </div>
   
 
   <button
     type="button"
     disabled={loadingFlashcards}
-    onClick={() => onGenerateFlashcards(course.id)}
+	    onClick={() => onGenerateFlashcards(course.id, {
+        count: flashcardCount,
+        difficulty: flashcardDifficulty,
+        instructions: flashcardFocus,
+      })}
     className={`w-full h-12 rounded-2xl text-white font-bold flex items-center justify-center gap-2 ${
       loadingFlashcards
         ? "bg-[#A78BFA] cursor-not-allowed"
@@ -732,10 +784,22 @@ function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGener
 </div>
           <div className="mb-5">
 
-  <button
+  <div className="rounded-2xl bg-blue-50 p-4 grid gap-3 mb-3">
+    <p className="text-sm font-extrabold text-blue-600">Options du résumé</p>
+    <label className="text-xs font-bold text-slate-500">
+      Longueur approximative : {summaryLines} lignes
+      <input type="range" min="5" max="100" step="5" value={summaryLines} onChange={(e) => setSummaryLines(Number(e.target.value))} className="mt-2 w-full accent-[#8B6CF6]" />
+    </label>
+    <input value={summaryInstructions} onChange={(e) => setSummaryInstructions(e.target.value)} maxLength={500} placeholder="Consigne : insiste sur les méthodes..." className="h-10 rounded-xl border border-blue-100 px-3 bg-white text-sm" />
+  </div>
+
+	  <button
     type="button"
     disabled={loadingSummary}
-    onClick={() => onGenerateSummary(course.id)}
+	    onClick={() => onGenerateSummary(course.id, {
+        line_count: summaryLines,
+        instructions: summaryInstructions,
+      })}
     className={`mb-4 w-full h-12 rounded-2xl text-white font-bold flex items-center justify-center gap-2 ${
       loadingSummary
         ? "bg-[#A78BFA] cursor-not-allowed"
@@ -859,17 +923,12 @@ function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGener
 
 function EmptyState() {
   return (
-    <div className="bg-white rounded-3xl border border-dashed border-slate-200 p-12 text-center">
-      <div className="text-5xl mb-4">📁</div>
-
-      <h3 className="mt-3 text-lg font-bold text-[#1E293B]">
-        Aucun cours pour le moment
-      </h3>
-
-      <p className="text-sm text-slate-400 mt-1">
-        Glisse ton premier PDF dans la zone au-dessus pour créer ton cours automatiquement.
-      </p>
-    </div>
+    <MemiGuide
+      mood="welcome"
+      eyebrow="Bibliothèque vide"
+      title="Commençons à apprendre !"
+      message="Glisse ton premier PDF dans la zone au-dessus et je t’aiderai à créer résumés, flashcards et quiz."
+    />
   );
 }
 

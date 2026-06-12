@@ -174,6 +174,9 @@ def generate_ai_revision_plan(request):
             "error": "deck_id et exam_date sont obligatoires"
         }, status=400)
 
+    if not isinstance(exam_date_raw, str):
+        return Response({"error": "exam_date doit être au format YYYY-MM-DD"}, status=400)
+
     try:
         deck_id = int(deck_id)
     except (TypeError, ValueError):
@@ -244,6 +247,8 @@ def generate_ai_revision_plan(request):
     valid_sessions = []
     occurrences_by_day = {}
     for ai_session in ai_sessions:
+        if not isinstance(ai_session, dict):
+            continue
         day = ai_session.get("day")
 
         try:

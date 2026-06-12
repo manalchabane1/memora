@@ -17,6 +17,7 @@ from .views import (
     generate_personal_quiz,
     get_quizzes,
     delete_quiz,
+    check_quiz_answer,
 )
 
 urlpatterns = [
@@ -67,6 +68,11 @@ urlpatterns = [
         "quizzes/<int:quiz_id>/submit/",
         submit_quiz,
         name="submit_quiz"
+    ),
+    path(
+        "quizzes/<int:quiz_id>/questions/<int:question_id>/check/",
+        check_quiz_answer,
+        name="check_quiz_answer",
     ),
 
     path(

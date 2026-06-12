@@ -29,7 +29,7 @@ DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() in {"1", "true", "yes"}
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     if not DEBUG:
-        raise ImproperConfigured("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is false")
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is false")
     SECRET_KEY = secrets.token_urlsafe(50)
 
 ALLOWED_HOSTS = [

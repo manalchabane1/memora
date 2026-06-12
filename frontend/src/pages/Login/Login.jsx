@@ -2,10 +2,16 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mail, Lock, Eye, EyeOff, Sparkles, ArrowRight, User } from "lucide-react";
 import memiImage from "/src/assets/mascot.png";
+import logoImage from "/src/assets/logo.png";
 import { loginAccount, registerAccount, requestPasswordReset } from "../../services/api";
 import { storeProfile } from "../../utils/profile";
 
 function Login() {
+  const [sessionMessage] = useState(() => {
+    const message = sessionStorage.getItem("authMessage") || "";
+    sessionStorage.removeItem("authMessage");
+    return message;
+  });
   const navigate = useNavigate();
 
   const [isSignup, setIsSignup] = useState(false);
@@ -83,7 +89,7 @@ function Login() {
       <section className="hidden lg:flex relative flex-col justify-between bg-gradient-to-br from-[#8B6CF6] to-[#A78BFA] p-8 text-white overflow-hidden">
         <div className="relative z-10 flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center backdrop-blur">
-            <img src="/src/assets/logo.png" alt="logo" />
+            <img src={logoImage} alt="logo" />
           </div>
 
           <div>
@@ -123,6 +129,11 @@ function Login() {
         <div className="absolute inset-0 opacity-60 bg-[radial-gradient(#DDD6FE_1px,transparent_1px)] [background-size:22px_22px]" />
 
         <div className="relative w-full max-w-[380px]">
+          {sessionMessage && (
+            <p className="mb-4 rounded-2xl bg-amber-50 border border-amber-100 px-4 py-3 text-sm font-bold text-amber-700">
+              {sessionMessage}
+            </p>
+          )}
           <div className="mb-6">
             <div className="inline-flex items-center gap-2 rounded-full bg-[#8B6CF6]/10 text-[#8B6CF6] px-4 py-1.5 text-xs font-bold mb-4">
               <Sparkles className="w-3 h-3" />

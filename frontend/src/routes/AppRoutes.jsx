@@ -26,6 +26,8 @@ function ProtectedRoute({ children }) {
 }
 
 function AppRoutes() {
+  const defaultRoute = localStorage.getItem("token") ? "/dashboard" : "/";
+
   return (
   <Suspense fallback={<div className="min-h-screen grid place-items-center font-bold text-[#8B6CF6]">Chargement...</div>}>
   <Routes>
@@ -50,10 +52,10 @@ function AppRoutes() {
       <Route path="/todo" element={<Todo />} />
       <Route path="/forum" element={<Forum />} />
     </Route>
+    <Route path="*" element={<Navigate to={defaultRoute} replace />} />
   </Routes>
   </Suspense>
 );
 }
 export default AppRoutes;
-
 
