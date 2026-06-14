@@ -26,6 +26,7 @@ import {
   updateRevisionSession,
   getDecks,
 } from "../../services/api";
+import { MemiGuide } from "../../components/AnimatedMemi";
 
 const HOURS = Array.from({ length: 24 }).map((_, i) => i);
 const DAYS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
@@ -151,6 +152,9 @@ function Planning() {
     (sum, event) => sum + (event.endHour - event.startHour),
     0
   );
+  const daysBeforeExam = aiExamDate
+    ? Math.ceil((parseDate(aiExamDate) - new Date()) / (1000 * 60 * 60 * 24))
+    : null;
 
   const openAddModal = () => {
     setEditingEvent(null);
@@ -344,6 +348,28 @@ function Planning() {
           </button>
         </div>
       </header>
+
+      {loadingAi && (
+        <MemiGuide
+          mood="planning"
+          eyebrow="Planning IA"
+          title="Je construis ton programme de révision..."
+          message="J’organise tes disponibilités et tes priorités en séances réalistes."
+          compact
+          className="mb-6"
+        />
+      )}
+
+      {!loadingAi && daysBeforeExam !== null && daysBeforeExam >= 0 && daysBeforeExam <= 3 && (
+        <MemiGuide
+          mood="encouraging"
+          eyebrow="Examen proche"
+          title={`Ton examen est dans ${daysBeforeExam || "moins d’un"} jour${daysBeforeExam > 1 ? "s" : ""}.`}
+          message="Concentre-toi sur les chapitres essentiels et garde des séances réalistes."
+          compact
+          className="mb-6"
+        />
+      )}
 
       <section className="grid xl:grid-cols-2 gap-4 mb-8">
         <div className="bg-white rounded-3xl border border-slate-100 p-5 shadow-sm">

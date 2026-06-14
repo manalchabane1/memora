@@ -20,6 +20,7 @@ import {
 Check,
 
 } from "lucide-react";
+import { MemiGuide } from "../../components/AnimatedMemi";
 
 const initialSubjects = [];
 const initialCourses = [];
@@ -59,6 +60,8 @@ const [editingChatId, setEditingChatId] = useState(null);
 const [editingChatTitle, setEditingChatTitle] = useState("");
 
 
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+ 
 
   useEffect(() => {
     async function loadCourses() {
@@ -138,45 +141,50 @@ const startNewGlobalChat = () => {
       file.name.toLowerCase().endsWith(".pdf")
     );
 
-    if (pdfs.length === 0) {
-      alert("Choisis un fichier PDF.");
-      return;
+  if (pdfs.length === 0) {
+    alert("Choisis un fichier PDF.");
+    return;
+  }
+
+  try {
+    setUploadingPdf(true);
+    for (const file of pdfs) {
+      const savedCourse = await uploadCoursePDF(file);
+
+      const uploadedCourse = {
+        id: savedCourse.id,
+        title: savedCourse.title,
+        subjectId: savedCourse.subject || "Général",
+        description: "",
+        chapters: [],
+        summary: "Résumé IA en attente.",
+        fileName: savedCourse.file_name || file.name,
+      };
+
+      setCourses((prev) => [uploadedCourse, ...prev]);
     }
 
-    try {
-      for (const file of pdfs) {
-        const savedCourse = await uploadCoursePDF(file);
-
-        const uploadedCourse = {
-          id: savedCourse.id,
-          title: savedCourse.title,
-          subjectId: activeSub === "all"
-  ? subjects[0]?.id
-  : activeSub,
-          description: "",
-          chapters: [],
-          summary: "Résumé IA en attente.",
-          fileName: savedCourse.file_name || file.name,
-        };
-
-        setCourses((prev) => [uploadedCourse, ...prev]);
-      }
-
-     
-
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    } catch (error) {
-      console.error(error);
-      alert(error.message);
+    if (!subjects.some((subject) => subject.id === "Général")) {
+      setSubjects((prev) => [
+        ...prev,
+        { id: "Général", name: "Général", color: "#8B6CF6" },
+      ]);
     }
-  };
 
-  const generateSummary = async (courseId) => {
-    try {
-      setLoadingSummary(true);
+  } catch (error) {
+    console.error(error);
+    alert(error.message);
+  } finally {
+    setUploadingPdf(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+};
 
+  const generateSummary = async (courseId, options) => {
+  try {
+    setLoadingSummary(true);
       const result = await generateSummaryFromCourse(courseId);
 
       if (!result.summary || result.summary.trim() === "") {
@@ -206,21 +214,7 @@ const startNewGlobalChat = () => {
     }
   };
 
-  const generateFlashcards = async (courseId) => {
-    try {
-      setLoadingFlashcards(true);
-      const result = await generateFlashcardsFromCourse(courseId);
-      if (result.already_exists) {
-        alert("Flashcards déjà générées pour ce cours.");
-      }
-      setFlashcardsReady(true);
-    } catch (error) {
-      console.error("Erreur génération flashcards :", error);
-      alert("Erreur pendant la génération des flashcards.");
-    } finally {
-      setLoadingFlashcards(false);
-    }
-  };
+ 
 
   const askGlobalMemi = async () => {
   const question = globalQuestion.trim();
@@ -298,12 +292,27 @@ const startNewGlobalChat = () => {
           : chat
       )
     );
+    console.error(error);
+    alert(error.message);
   } finally {
     setGlobalLoading(false);
   }
 };
 
-  const addSubject = () => {
+const generateFlashcards = async (courseId, options) => {
+  try {
+    setLoadingFlashcards(true);
+    await generateFlashcardsFromCourse(courseId, options);
+    setFlashcardsReady(true);
+  } catch (error) {
+    console.error("Erreur génération flashcards :", error);
+    alert(error.message);
+  }finally {
+    setLoadingFlashcards(false);
+  }
+};
+
+const addSubject = () => {
     const name = newSubject.trim();
     if (!name || subjects.some((subject) => subject.name.toLowerCase() === name.toLowerCase())) return;
 
@@ -430,6 +439,17 @@ const startNewGlobalChat = () => {
           </div>
         </div>
       </header>
+
+      {uploadingPdf && (
+        <MemiGuide
+          mood="working"
+          eyebrow="Import du cours"
+          title="Je lis ton document..."
+          message="Je vérifie le PDF et prépare ton cours pour les prochaines générations."
+          compact
+          className="mb-6"
+        />
+      )}
 
       <section
         onClick={openFilePicker}
@@ -847,25 +867,7 @@ const startNewGlobalChat = () => {
               >
                 <ReactMarkdown>{message.text}</ReactMarkdown>
 
-                {message.sources?.length > 0 && (
-                  <div className="mt-4 pt-3 border-t border-slate-200">
-                    <p className="text-sm font-extrabold text-[#1E293B] mb-2">
-                      Sources utilisées :
-                    </p>
-
-                    <div className="flex flex-wrap gap-2">
-                      {message.sources.map((source, i) => (
-                        <span
-                          key={i}
-                          className="px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-bold text-slate-500 flex items-center gap-1"
-                        >
-                          <Folder size={13} />
-                          {source}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                
               </div>
             </div>
           ))}
@@ -1060,6 +1062,11 @@ function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGener
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [pdfUrl, setPdfUrl] = useState("");
+  const [flashcardCount, setFlashcardCount] = useState(10);
+  const [flashcardDifficulty, setFlashcardDifficulty] = useState("all");
+  const [flashcardFocus, setFlashcardFocus] = useState("");
+  const [summaryLines, setSummaryLines] = useState(20);
+  const [summaryInstructions, setSummaryInstructions] = useState("");
 
   useEffect(() => {
     let objectUrl = "";
@@ -1173,69 +1180,117 @@ function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGener
         </div>
 
         <div className="p-8">
+          {(loadingFlashcards || loadingSummary) && (
+            <MemiGuide
+              mood={loadingSummary ? "thinking" : "working"}
+              eyebrow="Memi travaille"
+              title={loadingSummary ? "J’analyse ton document..." : "Je crée tes flashcards..."}
+              message={loadingSummary ? "Je repère les idées importantes et prépare une synthèse claire." : "Je transforme les notions clés en cartes faciles à réviser."}
+              compact
+              className="mb-5"
+            />
+          )}
           <div className="grid gap-3 mb-6">
-            <select
-              value={course.subjectId}
-              onChange={(e) => onAssignSubject(course.id, e.target.value)}
-              className="w-full h-12 rounded-2xl border border-slate-200 px-4 font-bold"
-            >
-              {subjects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
+	  <select
+    value={course.subjectId}
+    onChange={(e) => onAssignSubject(course.id, e.target.value)}
+    className="w-full h-12 rounded-2xl border border-slate-200 px-4 font-bold"
+  >
+    {subjects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+	  </select>
 
+  <div className="rounded-2xl bg-[#F8F5FF] p-4 grid gap-3">
+    <p className="text-sm font-extrabold text-[#8B6CF6]">Options des flashcards</p>
+    <div className="grid grid-cols-2 gap-3">
+      <label className="text-xs font-bold text-slate-500">
+        Nombre
+        <input type="number" min="5" max="40" value={flashcardCount} onChange={(e) => setFlashcardCount(e.target.value === "" ? "" : Number(e.target.value))} onBlur={() => setFlashcardCount(Math.min(40, Math.max(5, Number(flashcardCount) || 10)))} className="mt-1 w-full h-10 rounded-xl border border-slate-200 px-3 bg-white" />
+      </label>
+      <label className="text-xs font-bold text-slate-500">
+        Difficulté
+        <select value={flashcardDifficulty} onChange={(e) => setFlashcardDifficulty(e.target.value)} className="mt-1 w-full h-10 rounded-xl border border-slate-200 px-3 bg-white">
+          <option value="all">Mixte</option>
+          <option value="easy">Facile</option>
+          <option value="medium">Moyenne</option>
+          <option value="hard">Difficile</option>
+        </select>
+      </label>
+    </div>
+    <input value={flashcardFocus} onChange={(e) => setFlashcardFocus(e.target.value)} maxLength={500} placeholder="Focus : définitions, formules, chapitre..." className="h-10 rounded-xl border border-slate-200 px-3 bg-white text-sm" />
+  </div>
+  
 
-            <button
-              type="button"
-              disabled={loadingFlashcards}
-              onClick={() => onGenerateFlashcards(course.id)}
-              className={`w-full h-12 rounded-2xl text-white font-bold flex items-center justify-center gap-2 ${loadingFlashcards
-                  ? "bg-[#A78BFA] cursor-not-allowed"
-                  : "bg-[#8B6CF6] hover:bg-[#7C3AED]"
-                }`}
-            >
-              {loadingFlashcards ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Génération des flashcards...
-                </>
-              ) : (
-                <>
-                  <Sparkles size={17} />
-                  Générer les flashcards
-                </>
-              )}
-            </button>
-            {flashcardsReady && (
-              <button
-                onClick={() => window.location.href = "/flashcards"}
-                className="w-full h-12 rounded-2xl bg-[#1E293B] text-white font-bold hover:bg-[#0f172a]"
-              >
-                Voir les flashcards générées →
-              </button>
-            )}
-          </div>
+  <button
+    type="button"
+    disabled={loadingFlashcards}
+	    onClick={() => onGenerateFlashcards(course.id, {
+        count: flashcardCount,
+        difficulty: flashcardDifficulty,
+        instructions: flashcardFocus,
+      })}
+    className={`w-full h-12 rounded-2xl text-white font-bold flex items-center justify-center gap-2 ${
+      loadingFlashcards
+        ? "bg-[#A78BFA] cursor-not-allowed"
+        : "bg-[#8B6CF6] hover:bg-[#7C3AED]"
+    }`}
+  >
+    {loadingFlashcards ? (
+      <>
+        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+        Génération des flashcards...
+      </>
+    ) : (
+      <>
+        <Sparkles size={17} />
+        Générer les flashcards
+      </>
+    )}
+  </button>
+  {flashcardsReady && (
+  <button
+    onClick={() => window.location.href = "/flashcards"}
+    className="w-full h-12 rounded-2xl bg-[#1E293B] text-white font-bold hover:bg-[#0f172a]"
+  >
+    Voir les flashcards générées →
+  </button>
+)}
+</div>
           <div className="mb-5">
 
-            <button
-              type="button"
-              disabled={loadingSummary}
-              onClick={() => onGenerateSummary(course.id)}
-              className={`mb-4 w-full h-12 rounded-2xl text-white font-bold flex items-center justify-center gap-2 ${loadingSummary
-                  ? "bg-[#A78BFA] cursor-not-allowed"
-                  : "bg-[#8B6CF6] hover:bg-[#7C3AED]"
-                }`}
-            >
-              {loadingSummary ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Génération du résumé...
-                </>
-              ) : (
-                <>
-                  <Sparkles size={17} />
-                  Résumer avec l’IA
-                </>
-              )}
-            </button>
+  <div className="rounded-2xl bg-blue-50 p-4 grid gap-3 mb-3">
+    <p className="text-sm font-extrabold text-blue-600">Options du résumé</p>
+    <label className="text-xs font-bold text-slate-500">
+      Longueur approximative : {summaryLines} lignes
+      <input type="range" min="5" max="100" step="5" value={summaryLines} onChange={(e) => setSummaryLines(Number(e.target.value))} className="mt-2 w-full accent-[#8B6CF6]" />
+    </label>
+    <input value={summaryInstructions} onChange={(e) => setSummaryInstructions(e.target.value)} maxLength={500} placeholder="Consigne : insiste sur les méthodes..." className="h-10 rounded-xl border border-blue-100 px-3 bg-white text-sm" />
+  </div>
+
+	  <button
+    type="button"
+    disabled={loadingSummary}
+	    onClick={() => onGenerateSummary(course.id, {
+        line_count: summaryLines,
+        instructions: summaryInstructions,
+      })}
+    className={`mb-4 w-full h-12 rounded-2xl text-white font-bold flex items-center justify-center gap-2 ${
+      loadingSummary
+        ? "bg-[#A78BFA] cursor-not-allowed"
+        : "bg-[#8B6CF6] hover:bg-[#7C3AED]"
+    }`}
+  >
+    {loadingSummary ? (
+      <>
+        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+        Génération du résumé...
+      </>
+    ) : (
+      <>
+        <Sparkles size={17} />
+        Résumer avec l’IA
+      </>
+    )}
+  </button>
 
             <div className="rounded-[30px] bg-white border border-slate-200 p-5 shadow-sm">
 
@@ -1339,23 +1394,18 @@ function CourseDrawer({ course, getSubject, onClose, onRename, onDelete, onGener
 
 function EmptyState() {
   return (
-    <div className="bg-white rounded-3xl border border-dashed border-slate-200 p-12 text-center">
-      <div className="text-5xl mb-4">📁</div>
-
-      <h3 className="mt-3 text-lg font-bold text-[#1E293B]">
-        Aucun cours pour le moment
-      </h3>
-
-      <p className="text-sm text-slate-400 mt-1">
-        Glisse ton premier PDF dans la zone au-dessus pour créer ton cours automatiquement.
-      </p>
-    </div>
+    <MemiGuide
+      mood="welcome"
+      eyebrow="Bibliothèque vide"
+      title="Commençons à apprendre !"
+      message="Glisse ton premier PDF dans la zone au-dessus et je t’aiderai à créer résumés, flashcards et quiz."
+    />
   );
 }
 
 
 
-
+  
 
 
 export default Courses;

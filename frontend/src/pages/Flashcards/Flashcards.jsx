@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import flashcard from "/src/assets/flashcard.png";
 import memiImage from "/src/assets/mascot.png";
 import { deleteDeck, getDecks, uploadCoursePDF, generateFlashcardsFromCourse } from "../../services/api";
+import AnimatedMemi, { MemiGuide } from "../../components/AnimatedMemi";
 import {
   ChevronLeft,
   ChevronRight,
@@ -27,6 +28,10 @@ function Flashcards() {
   const [flipped, setFlipped] = useState(false);
   const [progress, setProgress] = useState({ hard: 0, good: 0, easy: 0 });
   const [shuffledCards, setShuffledCards] = useState([]);
+  const [difficultyFilter, setDifficultyFilter] = useState("all");
+  const [generationCount, setGenerationCount] = useState(10);
+  const [generationDifficulty, setGenerationDifficulty] = useState("all");
+  const [generationFocus, setGenerationFocus] = useState("");
 
   
 
@@ -61,8 +66,8 @@ function Flashcards() {
   );
 
   const deck = decks.find((d) => d.id === deckId);
-  const activeCards =
-  shuffledCards.length > 0 ? shuffledCards : deck?.cards || [];
+  const activeCards = (shuffledCards.length > 0 ? shuffledCards : deck?.cards || [])
+    .filter((item) => difficultyFilter === "all" || item.difficulty === difficultyFilter);
 
   const card = activeCards[idx];
   const total = activeCards.length || 0;
@@ -86,7 +91,11 @@ function Flashcards() {
 
     try {
       const savedCourse = await uploadCoursePDF(pdf);
-      await generateFlashcardsFromCourse(savedCourse.id);
+      await generateFlashcardsFromCourse(savedCourse.id, {
+        count: generationCount,
+        difficulty: generationDifficulty,
+        instructions: generationFocus,
+      });
 
       const data = await getDecks();
       setDecks(data);
@@ -97,6 +106,8 @@ function Flashcards() {
     } catch (error) {
       console.error(error);
       alert(error.message);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -130,7 +141,24 @@ function Flashcards() {
         </div>
       </header>
 
-      <PdfGenerator onClick={() => fileInputRef.current?.click()} />
+      <MemiGuide
+        mood="welcome"
+        eyebrow="Premières flashcards"
+        title="Ajoute un cours et je prépare tes cartes."
+        message="Choisis le nombre, la difficulté et le sujet à privilégier, puis envoie ton PDF."
+        compact
+        className="mb-6"
+      />
+
+      <PdfGenerator
+        onClick={() => fileInputRef.current?.click()}
+        count={generationCount}
+        setCount={setGenerationCount}
+        difficulty={generationDifficulty}
+        setDifficulty={setGenerationDifficulty}
+        focus={generationFocus}
+        setFocus={setGenerationFocus}
+      />
     </div>
   );
 }
@@ -212,8 +240,36 @@ function Flashcards() {
         </button>
       </div>
 
+      {mode === "study" && (
+        <div className="mb-5 flex items-center gap-3">
+          <span className="text-sm font-bold text-slate-500">Filtrer les cartes :</span>
+          <select
+            value={difficultyFilter}
+            onChange={(event) => {
+              setDifficultyFilter(event.target.value);
+              setIdx(0);
+              setFlipped(false);
+            }}
+            className="h-10 rounded-2xl border border-slate-200 bg-white px-4 font-bold text-slate-600"
+          >
+            <option value="all">Toutes les difficultés</option>
+            <option value="easy">Faciles</option>
+            <option value="medium">Moyennes</option>
+            <option value="hard">Difficiles</option>
+          </select>
+        </div>
+      )}
+
       {mode === "pdf" ? (
-  <PdfGenerator onClick={() => fileInputRef.current?.click()} />
+  <PdfGenerator
+    onClick={() => fileInputRef.current?.click()}
+    count={generationCount}
+    setCount={setGenerationCount}
+    difficulty={generationDifficulty}
+    setDifficulty={setGenerationDifficulty}
+    focus={generationFocus}
+    setFocus={setGenerationFocus}
+  />
 ) : (
         <div className="space-y-8">
           <aside className="max-w-[950px] mx-auto">
@@ -503,12 +559,7 @@ function Flashcards() {
     </>
   ) : (
     <div className="bg-white rounded-[34px] border border-slate-100 p-12 text-center shadow-xl max-w-[850px] mx-auto">
-      <img
-        src={memiImage}
-        alt="Memi"
-        className="w-28 h-28 object-contain mx-auto mb-5"
-        style={{ animation: "memiFloat 3.8s ease-in-out infinite" }}
-      />
+      <AnimatedMemi mood="celebrating" className="w-32 h-32 mx-auto mb-5" />
 
       <h2 className="text-3xl font-extrabold">
         Bravo, session terminée 🎉
@@ -534,7 +585,7 @@ function Flashcards() {
   );
 }
 
-function PdfGenerator({ onClick }) {
+function PdfGenerator({ onClick, count, setCount, difficulty, setDifficulty, focus, setFocus }) {
   return (
     <div>
       <section className="rounded-[34px] bg-gradient-to-br from-[#8B6CF6] to-[#C084FC] text-white p-8 mb-7 relative overflow-hidden">
@@ -552,6 +603,23 @@ function PdfGenerator({ onClick }) {
           alt="Flashcard mascot"
           className="absolute right-10 top-8 w-28 h-28 object-contain drop-shadow-xl hover:scale-110 transition duration-300"
         />
+      </section>
+
+      <section className="rounded-[28px] bg-white border border-slate-100 p-5 mb-5 grid md:grid-cols-2 gap-4">
+        <label className="text-sm font-bold text-slate-500">
+          Nombre de cartes
+          <input type="number" min="5" max="40" value={count} onChange={(e) => setCount(e.target.value === "" ? "" : Number(e.target.value))} onBlur={() => setCount(Math.min(40, Math.max(5, Number(count) || 10)))} className="mt-2 w-full h-11 rounded-2xl border border-slate-200 px-4" />
+        </label>
+        <label className="text-sm font-bold text-slate-500">
+          Difficulté
+          <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="mt-2 w-full h-11 rounded-2xl border border-slate-200 px-4">
+            <option value="all">Mixte</option>
+            <option value="easy">Facile</option>
+            <option value="medium">Moyenne</option>
+            <option value="hard">Difficile</option>
+          </select>
+        </label>
+        <input value={focus} onChange={(e) => setFocus(e.target.value)} maxLength={500} placeholder="Focus ou consigne optionnelle" className="md:col-span-2 h-11 rounded-2xl border border-slate-200 px-4" />
       </section>
 
       <section

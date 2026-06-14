@@ -1,5 +1,7 @@
 import logging
+import mimetypes
 
+from PIL import Image, UnidentifiedImageError
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from django.conf import settings
@@ -9,6 +11,7 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from django.contrib.auth.tokens import default_token_generator
 from django.core.validators import validate_email
+from django.http import FileResponse
 
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
@@ -16,9 +19,46 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from .models import UserProfile
 
 
 logger = logging.getLogger(__name__)
+
+
+def string_value(data, key, default=""):
+    value = data.get(key, default)
+    return value if isinstance(value, str) else None
+
+
+def validate_avatar_upload(avatar):
+    if avatar.size > 5 * 1024 * 1024 or not (avatar.content_type or "").startswith("image/"):
+        return "La photo doit être une image de moins de 5 Mo"
+    try:
+        image = Image.open(avatar)
+        image.verify()
+    except (UnidentifiedImageError, OSError):
+        return "La photo envoyée n'est pas une image valide"
+    finally:
+        avatar.seek(0)
+    return None
+
+
+def profile_data(request, user):
+    details, _ = UserProfile.objects.get_or_create(user=user)
+    avatar_url = (
+        request.build_absolute_uri(f"/api/accounts/profile-avatar/{user.id}/")
+        if details.avatar
+        else ""
+    )
+    return {
+        "name": get_display_name(user),
+        "email": user.email,
+        "bio": details.bio,
+        "school": details.school,
+        "study_level": details.study_level,
+        "preferred_subjects": details.preferred_subjects,
+        "avatar_url": avatar_url,
+    }
 
 
 def get_display_name(user):
@@ -38,10 +78,15 @@ def get_display_name(user):
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def register(request):
-    email = (request.data.get("email") or request.data.get("username") or "").strip().lower()
-    username = email
+    raw_email = request.data.get("email") or request.data.get("username") or ""
+    raw_name = request.data.get("name") or ""
     password = request.data.get("password")
-    name = (request.data.get("name") or "").strip()
+    if not isinstance(raw_email, str) or not isinstance(raw_name, str) or not isinstance(password, str):
+        return Response({"error": "Le format des champs est invalide"}, status=400)
+
+    email = raw_email.strip().lower()
+    username = email
+    name = raw_name.strip()
 
     if not username or not password or not email or not name:
         return Response({"error": "Champs manquants"}, status=400)
@@ -125,8 +170,11 @@ def verify_email(request, uidb64, token):
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def login(request):
-    username = (request.data.get("username") or "").strip().lower()
+    raw_username = request.data.get("username") or ""
     password = request.data.get("password")
+    if not isinstance(raw_username, str) or not isinstance(password, str):
+        return Response({"error": "Le format des identifiants est invalide"}, status=400)
+    username = raw_username.strip().lower()
 
     user = authenticate(username=username, password=password)
 
@@ -157,13 +205,22 @@ def logout(request):
 @permission_classes([IsAuthenticated])
 def profile(request):
     if request.method == "GET":
-        return Response({
-            "name": get_display_name(request.user),
-            "email": request.user.email,
-        })
+        return Response(profile_data(request, request.user))
 
-    name = (request.data.get("name") or request.user.first_name).strip()
-    email = (request.data.get("email") or request.user.email).strip().lower()
+    details, _ = UserProfile.objects.get_or_create(user=request.user)
+    raw_name = string_value(request.data, "name", request.user.first_name)
+    raw_email = string_value(request.data, "email", request.user.email)
+    raw_bio = string_value(request.data, "bio", details.bio)
+    raw_school = string_value(request.data, "school", details.school)
+    raw_study_level = string_value(request.data, "study_level", details.study_level)
+    if None in (raw_name, raw_email, raw_bio, raw_school, raw_study_level):
+        return Response({"error": "Le format des informations du profil est invalide"}, status=400)
+
+    name = raw_name.strip()
+    email = raw_email.strip().lower()
+    bio = raw_bio.strip()
+    school = raw_school.strip()
+    study_level = raw_study_level.strip()
 
     if not email:
         return Response({"error": "Email est requis"}, status=400)
@@ -180,11 +237,51 @@ def profile(request):
     if User.objects.exclude(pk=request.user.pk).filter(username=email).exists():
         return Response({"error": "Email déjà utilisé"}, status=400)
 
-    request.user.first_name = name
-    request.user.email = email
-    request.user.username = email
-    request.user.save(update_fields=["first_name", "email", "username"])
-    return Response({"name": name, "email": email})
+    if len(bio) > 500 or len(school) > 150 or len(study_level) > 100:
+        return Response({"error": "Une information du profil est trop longue"}, status=400)
+
+    preferred_subjects = request.data.get("preferred_subjects", details.preferred_subjects)
+    if isinstance(preferred_subjects, str):
+        preferred_subjects = [
+            subject.strip() for subject in preferred_subjects.split(",") if subject.strip()
+        ]
+    if not isinstance(preferred_subjects, list):
+        return Response({"error": "Les matières préférées sont invalides"}, status=400)
+    normalized_subjects = [
+        str(subject).strip()[:100] for subject in preferred_subjects[:20] if str(subject).strip()
+    ]
+
+    avatar = request.FILES.get("avatar")
+    if avatar:
+        avatar_error = validate_avatar_upload(avatar)
+        if avatar_error:
+            return Response({"error": avatar_error}, status=400)
+
+    with transaction.atomic():
+        request.user.first_name = name
+        request.user.email = email
+        request.user.username = email
+        request.user.save(update_fields=["first_name", "email", "username"])
+
+        details.bio = bio
+        details.school = school
+        details.study_level = study_level
+        details.preferred_subjects = normalized_subjects
+        if avatar:
+            details.avatar = avatar
+        details.save()
+
+    return Response(profile_data(request, request.user))
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def profile_avatar(request, user_id):
+    details = UserProfile.objects.filter(user_id=user_id).first()
+    if not details or not details.avatar:
+        return Response({"error": "Photo introuvable"}, status=404)
+    content_type = mimetypes.guess_type(details.avatar.name)[0] or "application/octet-stream"
+    return FileResponse(details.avatar.open("rb"), content_type=content_type)
 
 
 @api_view(["POST"])
@@ -193,6 +290,8 @@ def change_password(request):
     current_password = request.data.get("current_password")
     new_password = request.data.get("new_password")
 
+    if not isinstance(current_password, str) or not isinstance(new_password, str):
+        return Response({"error": "Le format des mots de passe est invalide"}, status=400)
     if not current_password or not new_password:
         return Response({"error": "Les deux mots de passe sont requis"}, status=400)
     if not request.user.check_password(current_password):
@@ -212,7 +311,10 @@ def change_password(request):
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def password_reset_request(request):
-    email = (request.data.get("email") or "").strip().lower()
+    raw_email = request.data.get("email") or ""
+    if not isinstance(raw_email, str):
+        return Response({"error": "Le format de l'email est invalide"}, status=400)
+    email = raw_email.strip().lower()
     if not email:
         return Response({"error": "Email est requis"}, status=400)
     user = User.objects.filter(email__iexact=email).first()
@@ -246,6 +348,8 @@ def password_reset_request(request):
 def password_reset_confirm(request, uidb64, token):
     password=request.data.get("password")
 
+    if not isinstance(password, str):
+        return Response({"error": "Le format du mot de passe est invalide"}, status=400)
     if not password:
         return Response({"error": "Mot de passe est manquant"}, status=400)
     

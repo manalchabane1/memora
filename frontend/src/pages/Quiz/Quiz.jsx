@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import image from "/src/assets/image.png";
 import {
+    checkQuizAnswer,
     deleteQuizApi,
     generatePersonalQuiz,
     generateQuizFromDeck as generateQuizFromDeckApi,
@@ -8,6 +8,7 @@ import {
     getQuizzes,
     submitQuiz,
 } from "../../services/api";
+import AnimatedMemi, { MemiGuide } from "../../components/AnimatedMemi";
 import {
     Play,
     Sparkles,
@@ -15,7 +16,6 @@ import {
     Plus,
     ArrowRight,
     RotateCcw,
-    Trophy,
     Lightbulb,
     Trash2,
 } from "lucide-react";
@@ -53,6 +53,11 @@ function Quiz() {
     const [finished, setFinished] = useState(false);
     const [answers, setAnswers] = useState({});
     const [submitting, setSubmitting] = useState(false);
+    const [checkingAnswer, setCheckingAnswer] = useState(false);
+    const [answerFeedback, setAnswerFeedback] = useState(null);
+    const [questionCount, setQuestionCount] = useState(10);
+    const [quizDifficulty, setQuizDifficulty] = useState("medium");
+    const [quizInstructions, setQuizInstructions] = useState("");
 
     useEffect(() => {
         async function loadQuizData() {
@@ -69,17 +74,14 @@ function Quiz() {
     }, []);
 
     const generateQuizFromDeck = async (deck) => {
-        const existingQuiz = quizzes.find((quiz) => quiz.deckId === deck.id);
-
-        if (existingQuiz) {
-            alert("Quiz déjà généré.");
-            return;
-        }
-
         try {
             setLoadingQuizCourseId(deck.id);
 
-            const result = await generateQuizFromDeckApi(deck.id);
+            const result = await generateQuizFromDeckApi(deck.id, {
+                count: questionCount,
+                difficulty: quizDifficulty,
+                instructions: quizInstructions,
+            });
             if (result.already_exists) {
                 alert(result.message || "Quiz déjà généré.");
                 setShowCourses(false);
@@ -91,7 +93,7 @@ function Quiz() {
             setShowCourses(false);
         } catch (err) {
             console.error(err);
-            alert("Erreur pendant la génération du quiz.");
+            alert(err.message);
         } finally {
             setLoadingQuizCourseId(null);
         }
@@ -103,7 +105,11 @@ function Quiz() {
         try {
             setLoadingPersonalQuiz(true);
 
-            const result = await generatePersonalQuiz(personalTopic);
+            const result = await generatePersonalQuiz(personalTopic, {
+                count: questionCount,
+                difficulty: quizDifficulty,
+                instructions: quizInstructions,
+            });
             const newQuiz = formatQuiz(result);
 
             setQuizzes((prev) => [newQuiz, ...prev]);
@@ -111,7 +117,7 @@ function Quiz() {
             setShowPersonalForm(false);
         } catch (err) {
             console.error(err);
-            alert("Erreur génération quiz.");
+            alert(err.message);
         } finally {
             setLoadingPersonalQuiz(false);
         }
@@ -134,16 +140,31 @@ function Quiz() {
         setShowHint(false);
         setFinished(false);
         setAnswers({});
+        setAnswerFeedback(null);
     };
 
     const question = selectedQuiz?.questions[step];
 
-    const chooseAnswer = (index) => {
-        if (selectedAnswer !== null) return;
+    const chooseAnswer = async (index) => {
+        if (selectedAnswer !== null || checkingAnswer) return;
 
         setSelectedAnswer(index);
-
         setAnswers((previous) => ({ ...previous, [question.id]: question.options[index] }));
+        setCheckingAnswer(true);
+        try {
+            const feedback = await checkQuizAnswer(
+                selectedQuiz.id,
+                question.id,
+                question.options[index]
+            );
+            setAnswerFeedback(feedback);
+            if (feedback.is_correct) setScore((current) => current + 1);
+        } catch (error) {
+            setSelectedAnswer(null);
+            alert(error.message);
+        } finally {
+            setCheckingAnswer(false);
+        }
     };
 
     const nextQuestion = async () => {
@@ -161,6 +182,7 @@ function Quiz() {
         } else {
             setStep((s) => s + 1);
             setSelectedAnswer(null);
+            setAnswerFeedback(null);
             setShowHint(false);
         }
     };
@@ -181,6 +203,8 @@ function Quiz() {
                 nextQuestion={nextQuestion}
                 restart={restart}
                 submitting={submitting}
+                checkingAnswer={checkingAnswer}
+                answerFeedback={answerFeedback}
             />
         );
     }
@@ -220,6 +244,17 @@ function Quiz() {
                 </button>
             </header>
 
+            {(loadingQuizCourseId !== null || loadingPersonalQuiz) && (
+                <MemiGuide
+                    mood="working"
+                    eyebrow="Quiz IA"
+                    title="Je prépare tes questions..."
+                    message="Je rédige des choix plausibles et vérifie chaque bonne réponse."
+                    compact
+                    className="mb-6"
+                />
+            )}
+
             <section className="rounded-[34px] bg-gradient-to-br from-[#8B6CF6] to-[#C084FC] p-8 text-white flex items-center justify-between mb-8 overflow-visible relative">
                 <div>
                     <p className="font-bold flex items-center gap-2">
@@ -247,7 +282,15 @@ function Quiz() {
                         </button>
 
                         {showCourses && (
-                            <div className="absolute top-16 left-0 w-64 bg-white backdrop-blur-xl rounded-2xl border border-white/40 shadow-2xl p-3 z-50">
+                            <div className="absolute top-16 left-0 w-80 bg-white backdrop-blur-xl rounded-2xl border border-white/40 shadow-2xl p-3 z-50">
+                                <QuizOptions
+                                    count={questionCount}
+                                    setCount={setQuestionCount}
+                                    difficulty={quizDifficulty}
+                                    setDifficulty={setQuizDifficulty}
+                                    instructions={quizInstructions}
+                                    setInstructions={setQuizInstructions}
+                                />
                                 <p className="font-bold mb-3 text-slate-700">
                                     Choisir un cours
                                 </p>
@@ -295,6 +338,14 @@ function Quiz() {
                                     onChange={(e) => setPersonalTopic(e.target.value)}
                                     placeholder="Entrez le sujet du quiz..."
                                     className="w-full h-11 rounded-xl border border-slate-200 px-3 text-slate-700 outline-none focus:ring-2 focus:ring-[#FBBF24]/40"
+                                />
+                                <QuizOptions
+                                    count={questionCount}
+                                    setCount={setQuestionCount}
+                                    difficulty={quizDifficulty}
+                                    setDifficulty={setQuizDifficulty}
+                                    instructions={quizInstructions}
+                                    setInstructions={setQuizInstructions}
                                 />
 
                                 <button
@@ -368,6 +419,50 @@ function QuizCard({ quiz, onStart, onDelete }) {
     );
 }
 
+function QuizOptions({ count, setCount, difficulty, setDifficulty, instructions, setInstructions }) {
+    return (
+        <div className="grid gap-2 mb-3 text-slate-700">
+            <div className="grid grid-cols-2 gap-2">
+                <label className="text-xs font-bold">
+                    Questions
+                    <input
+                        type="number"
+                        min="5"
+                        max="30"
+                        value={count}
+                        onChange={(event) => setCount(
+                            event.target.value === "" ? "" : Number(event.target.value)
+                        )}
+                        onBlur={() => setCount(
+                            Math.min(30, Math.max(5, Number(count) || 10))
+                        )}
+                        className="mt-1 w-full h-9 rounded-xl border border-slate-200 px-2"
+                    />
+                </label>
+                <label className="text-xs font-bold">
+                    Niveau
+                    <select
+                        value={difficulty}
+                        onChange={(event) => setDifficulty(event.target.value)}
+                        className="mt-1 w-full h-9 rounded-xl border border-slate-200 px-2"
+                    >
+                        <option value="easy">Facile</option>
+                        <option value="medium">Moyen</option>
+                        <option value="hard">Difficile</option>
+                    </select>
+                </label>
+            </div>
+            <input
+                value={instructions}
+                onChange={(event) => setInstructions(event.target.value)}
+                maxLength={500}
+                placeholder="Focus ou consigne optionnelle"
+                className="h-9 rounded-xl border border-slate-200 px-2 text-xs"
+            />
+        </div>
+    );
+}
+
 function QuizArena({
     quiz,
     question,
@@ -380,6 +475,8 @@ function QuizArena({
     nextQuestion,
     restart,
     submitting,
+    checkingAnswer,
+    answerFeedback,
 }) {
     if (!question) {
         return (
@@ -452,10 +549,16 @@ function QuizArena({
                     <section className="grid md:grid-cols-2 gap-4 mt-6">
                         {question.options.map((option, index) => {
                             const isSelected = selectedAnswer === index;
+                            const isCorrect = answerFeedback?.correct_answer === option;
+                            const isWrongSelection = isSelected && answerFeedback && !answerFeedback.is_correct;
 
                             let style = "bg-white border-slate-100 hover:border-[#8B6CF6]/40";
 
-                            if (isSelected) {
+                            if (isCorrect) {
+                                style = "bg-emerald-50 border-emerald-400 text-emerald-800 shadow-[0_12px_35px_rgba(16,185,129,0.18)]";
+                            } else if (isWrongSelection) {
+                                style = "bg-rose-50 border-rose-400 text-rose-800 shadow-[0_12px_35px_rgba(244,63,94,0.16)]";
+                            } else if (isSelected) {
                                 style = "bg-[#8B6CF6]/10 border-[#8B6CF6] text-[#7C3AED]";
                             }
 
@@ -463,22 +566,41 @@ function QuizArena({
                                 <button
                                     key={index}
                                     onClick={() => chooseAnswer(index)}
-                                    className={`min-h-[90px] rounded-3xl border-2 p-5 text-left font-bold transition ${style}`}
+                                    disabled={selectedAnswer !== null}
+                                    className={`relative min-h-[90px] rounded-3xl border-2 p-5 text-left font-bold transition-all duration-300 ${style} ${selectedAnswer !== null ? "cursor-default" : "hover:-translate-y-0.5"}`}
                                 >
                                     <span className="text-sm opacity-50 mr-2">
                                         {String.fromCharCode(65 + index)}.
                                     </span>
                                     {option}
+                                    {isCorrect && <span className="absolute right-4 top-4 text-emerald-600">✓</span>}
+                                    {isWrongSelection && <span className="absolute right-4 top-4 text-rose-600">✕</span>}
                                 </button>
                             );
                         })}
                     </section>
 
                     {selectedAnswer !== null && (
-                        <div className="mt-6 flex justify-end">
+                        <div className="mt-6 flex flex-col md:flex-row md:items-center gap-4 justify-between">
+                            <div className={`rounded-2xl px-5 py-4 font-bold ${
+                                checkingAnswer
+                                    ? "bg-[#8B6CF6]/10 text-[#7C3AED]"
+                                    : answerFeedback?.is_correct
+                                        ? "bg-emerald-50 text-emerald-700"
+                                        : "bg-rose-50 text-rose-700"
+                            }`}>
+                                {checkingAnswer
+                                    ? "Memi vérifie ta réponse..."
+                                    : answerFeedback?.is_correct
+                                        ? "Bonne réponse !"
+                                        : `Pas tout à fait. La bonne réponse est : ${answerFeedback?.correct_answer || ""}`}
+                                {answerFeedback?.explanation && (
+                                    <p className="mt-1 text-sm font-medium opacity-80">{answerFeedback.explanation}</p>
+                                )}
+                            </div>
                             <button
                                 onClick={nextQuestion}
-                                disabled={submitting}
+                                disabled={submitting || checkingAnswer || !answerFeedback}
                                 className="h-12 px-6 rounded-2xl bg-[#1E293B] text-white font-bold flex items-center gap-2"
                             >
                                 {submitting
@@ -494,10 +616,9 @@ function QuizArena({
 
                 <aside className="space-y-4">
                     <div className="rounded-[30px] bg-white border border-slate-100 p-6">
-                        <img
-                            src={image}
-                            alt="Memi"
-                            className="w-24 h-24 object-contain mb-3 mx-auto"
+                        <AnimatedMemi
+                            mood={answerFeedback?.is_correct ? "celebrating" : answerFeedback ? "encouraging" : "thinking"}
+                            className="w-28 h-28 mb-3 mx-auto"
                         />
 
 
@@ -536,7 +657,10 @@ function ResultScreen({ quiz, score, restart, back }) {
     return (
         <div className="p-8 max-w-[1000px] mx-auto text-[#1E293B]">
             <section className="bg-white rounded-[40px] border border-slate-100 p-12 text-center shadow-xl">
-                <Trophy size={60} className="mx-auto text-[#FBBF24]" />
+                <AnimatedMemi
+                    mood={percent >= 70 ? "celebrating" : "encouraging"}
+                    className="w-40 h-40 mx-auto"
+                />
 
                 <h1 className="text-5xl font-extrabold mt-6">Quiz terminé</h1>
 

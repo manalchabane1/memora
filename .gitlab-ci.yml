@@ -3,7 +3,7 @@ image: node:20
 stages:
   - deploy
 
-pages:
+deploy-pages:
   stage: deploy
   script:
     - cd frontend
@@ -14,6 +14,7 @@ pages:
     - mkdir public
     - cp -r frontend/dist/* public/
     - cp public/index.html public/404.html
+  pages: true
   artifacts:
     paths:
       - public

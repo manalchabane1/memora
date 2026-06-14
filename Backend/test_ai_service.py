@@ -4,11 +4,9 @@ import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "memora_api.settings")
 django.setup()
 
-from ai_service.groq_service import (
-    generate_flashcards_with_groq,
-    generate_summary_with_groq,
-    generate_quiz_with_groq,
-)
+from ai_service.flashcards import generate_flashcards_with_groq
+from ai_service.quiz import generate_quiz_with_groq
+from ai_service.summary import generate_summary_with_groq
 
 
 sample_course = """

@@ -167,3 +167,33 @@ class PlanningAPITests(TestCase):
 
         self.assertEqual(response.status_code, 404)
         generate.assert_not_called()
+
+    @patch("planning.views.generate_revision_plan_with_groq")
+    def test_ai_planning_rejects_malformed_exam_date(self, generate):
+        response = self.client.post(
+            "/api/planning/generate-ai/",
+            {"deck_id": self.deck.id, "exam_date": ["2026-07-01"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        generate.assert_not_called()
+
+    @patch("planning.views.generate_revision_plan_with_groq", return_value=["invalid"])
+    def test_ai_planning_rejects_malformed_ai_items(self, _generate):
+        exam_date = timezone.localdate() + timedelta(days=14)
+        Availability.objects.create(
+            user=self.user,
+            day="Lundi",
+            start_time="09:00",
+            end_time="11:00",
+        )
+
+        response = self.client.post(
+            "/api/planning/generate-ai/",
+            {"deck_id": self.deck.id, "exam_date": exam_date.isoformat()},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(RevisionPlan.objects.count(), 0)

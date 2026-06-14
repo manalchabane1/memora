@@ -67,6 +67,12 @@ function AppLayout() {
   );
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [profileBio, setProfileBio] = useState("");
+  const [profileSchool, setProfileSchool] = useState("");
+  const [profileStudyLevel, setProfileStudyLevel] = useState("");
+  const [profileSubjects, setProfileSubjects] = useState("");
+  const [profileAvatar, setProfileAvatar] = useState(null);
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -90,7 +96,13 @@ function AppLayout() {
   };
 
   useEffect(() => {
-    const handleAuthExpired = () => navigate("/", { replace: true });
+    const handleAuthExpired = (event) => {
+      sessionStorage.setItem(
+        "authMessage",
+        event.detail?.message || "Ta session a expiré. Reconnecte-toi."
+      );
+      navigate("/", { replace: true });
+    };
     window.addEventListener("auth-expired", handleAuthExpired);
     return () => window.removeEventListener("auth-expired", handleAuthExpired);
   }, [navigate]);
@@ -100,6 +112,11 @@ function AppLayout() {
       .then((profile) => {
         setProfileName(profile.name || "");
         setProfileEmail(profile.email || "");
+        setProfileBio(profile.bio || "");
+        setProfileSchool(profile.school || "");
+        setProfileStudyLevel(profile.study_level || "");
+        setProfileSubjects((profile.preferred_subjects || []).join(", "));
+        setProfileAvatarUrl(profile.avatar_url || "");
         storeProfile(profile);
       })
       .catch(() => {});
@@ -225,9 +242,11 @@ function AppLayout() {
             <div className="flex items-center gap-3 mb-5">
               <div
                 title={`Initiales de ${displayName}`}
-                className="w-11 h-11 shrink-0 rounded-full bg-[#8B6CF6] text-white flex items-center justify-center font-bold"
+                className="w-11 h-11 shrink-0 rounded-full bg-[#8B6CF6] text-white flex items-center justify-center font-bold overflow-hidden"
               >
-                {initials}
+                {profileAvatarUrl
+                  ? <img src={profileAvatarUrl} alt={displayName} className="w-full h-full object-cover" />
+                  : initials}
               </div>
 
               <div className="flex-1 min-w-0">
@@ -316,6 +335,34 @@ function AppLayout() {
                       className={`mt-2 w-full h-12 rounded-2xl border px-4 outline-none ${darkMode ? "bg-slate-950 border-slate-700" : "bg-white border-slate-200"
                         }`}
                     />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-bold text-slate-400">École ou université</label>
+                    <input value={profileSchool} onChange={(e) => setProfileSchool(e.target.value)} maxLength={150} placeholder="Université, école..." className="mt-2 w-full h-12 rounded-2xl border border-slate-200 px-4 outline-none" />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-bold text-slate-400">Niveau d’études</label>
+                    <input value={profileStudyLevel} onChange={(e) => setProfileStudyLevel(e.target.value)} maxLength={100} placeholder="Licence 3, Master 1..." className="mt-2 w-full h-12 rounded-2xl border border-slate-200 px-4 outline-none" />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="text-sm font-bold text-slate-400">Bio</label>
+                    <textarea value={profileBio} onChange={(e) => setProfileBio(e.target.value)} maxLength={500} rows={3} placeholder="Quelques mots sur toi et tes objectifs..." className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none resize-none" />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="text-sm font-bold text-slate-400">Matières préférées</label>
+                    <input value={profileSubjects} onChange={(e) => setProfileSubjects(e.target.value)} placeholder="Mathématiques, Réseaux, Anglais..." className="mt-2 w-full h-12 rounded-2xl border border-slate-200 px-4 outline-none" />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="text-sm font-bold text-slate-400">Photo de profil</label>
+                    <input type="file" accept="image/*" onChange={(e) => setProfileAvatar(e.target.files?.[0] || null)} className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none" />
+                  </div>
+
+                  <div className="md:col-span-2">
                     <button
                       onClick={async () => {
                         setProfileError("");
@@ -323,9 +370,16 @@ function AppLayout() {
                           const profile = await updateProfile({
                             name: profileName,
                             email: profileEmail,
+                            bio: profileBio,
+                            school: profileSchool,
+                            study_level: profileStudyLevel,
+                            preferred_subjects: profileSubjects,
+                            ...(profileAvatar ? { avatar: profileAvatar } : {}),
                           });
                           setProfileName(profile.name);
                           setProfileEmail(profile.email);
+                          setProfileAvatarUrl(profile.avatar_url || "");
+                          setProfileAvatar(null);
                           storeProfile(profile);
                           setProfileSaved(true);
                           setTimeout(() => setProfileSaved(false), 2000);

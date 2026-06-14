@@ -6,13 +6,12 @@ import {
   CheckCircle2,
   Circle,
   Trash2,
-  Sparkles,
-  Flame,
   Pencil,
   X,
 } from "lucide-react";
 
 import todo from "/src/assets/todo.png";
+import { MemiGuide } from "../../components/AnimatedMemi";
 
 const PRIORITIES = {
   high: { label: "Haute", color: "#EF4444", bg: "bg-red-50", text: "text-red-600" },
@@ -325,18 +324,14 @@ function Todo() {
       </div>
 
       {stats.total > 0 && stats.done === stats.total && (
-        <div className="mt-6 bg-gradient-to-br from-[#8B6CF6] to-[#A78BFA] text-white rounded-3xl p-6 flex items-center gap-4">
-          <Sparkles size={26} />
-          <div>
-            <h3 className="font-extrabold text-xl">
-              Toutes les tâches sont terminées !
-            </h3>
-            <p className="text-white/80 text-sm">
-              Bravo, Memi est fier de toi.
-            </p>
-          </div>
-          <Flame className="ml-auto" size={28} />
-        </div>
+        <MemiGuide
+          mood="celebrating"
+          eyebrow="Mission accomplie"
+          title="Toutes les tâches sont terminées !"
+          message="Bravo, profite de cette petite victoire. Memi est fier de toi."
+          className="mt-6"
+          compact
+        />
       )}
 
       {editingTodo && (
@@ -507,13 +502,12 @@ function EditTodoModal({ todo, onClose, onSave, onDelete }) {
 
 function EmptyState() {
   return (
-    <div className="bg-white rounded-3xl border border-dashed border-slate-200 p-12 text-center">
-      <div className="text-5xl mb-4">✅</div>
-      <h3 className="text-xl font-extrabold">Aucune tâche trouvée</h3>
-      <p className="text-slate-400 mt-1">
-        Ajoute une nouvelle tâche pour commencer.
-      </p>
-    </div>
+    <MemiGuide
+      mood="encouraging"
+      eyebrow="Tout est calme"
+      title="Rien à faire pour le moment."
+      message="Profite de cette pause pendant qu’elle dure, ou ajoute ta prochaine mission."
+    />
   );
 }
 
