@@ -17,6 +17,10 @@ from .views import (
     generate_personal_quiz,
     get_quizzes,
     delete_quiz,
+    global_chat,
+    folders_list_create,
+    move_course_to_folder,
+    global_chat,
 )
 
 urlpatterns = [
@@ -98,4 +102,9 @@ urlpatterns = [
         delete_quiz,
         name="delete_quiz"
     ),
+    path("global-chat/", global_chat, name="global_chat"),
+
+    path("folders/", folders_list_create, name="folders_list_create"),
+path("<int:course_id>/move-folder/", move_course_to_folder, name="move_course_to_folder"),
+path("global-chat/", global_chat, name="global_chat"),
 ]

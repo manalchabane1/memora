@@ -2,6 +2,18 @@ from django.db import models
 from django.contrib.auth.models import User
 
 
+class Folder(models.Model):
+    name = models.CharField(max_length=255)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="folders"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
 # Create your models here.
 class CoursePDF(models.Model):
     title = models.CharField(max_length=255)
@@ -10,6 +22,10 @@ class CoursePDF(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
     user = models.ForeignKey(User, on_delete = models.CASCADE, related_name='course_pdfs')
     summary = models.TextField(blank=True, default="")
+    folder = models.ForeignKey(Folder,on_delete=models.SET_NULL,null=True,
+    blank=True,
+    related_name="courses"
+)
 
 
     def __str__(self):
@@ -94,3 +110,6 @@ class QuizAttempt(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.quiz.title} - {self.percentage}%"
+
+
+

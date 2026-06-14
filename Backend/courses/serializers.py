@@ -6,8 +6,18 @@ from .models import (
     Quiz,
     QuizQuestion,
     QuizAttempt,
+    Folder
 )
 
+class FolderSerializer(serializers.ModelSerializer):
+    courses_count = serializers.SerializerMethodField()
+
+    def get_courses_count(self, obj):
+        return obj.courses.count()
+
+    class Meta:
+        model = Folder
+        fields = ["id", "name", "courses_count", "created_at"]
 
 class FlashcardSerializer(serializers.ModelSerializer):
     front = serializers.CharField(source="question")

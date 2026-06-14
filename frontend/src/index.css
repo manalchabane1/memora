@@ -59,3 +59,23 @@
 .dark textarea::placeholder {
   color: #94a3b8 !important;
 }
+
+
+/*chat cours */
+@keyframes memiThinking {
+  0% {
+    transform: rotate(-3deg);
+  }
+
+  50% {
+    transform: rotate(3deg);
+  }
+
+  100% {
+    transform: rotate(-3deg);
+  }
+}
+
+.memi-thinking {
+  animation: memiThinking 2s ease-in-out infinite;
+}
