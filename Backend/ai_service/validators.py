@@ -16,7 +16,13 @@ def validate_flashcards(cards):
         question = normalize_text(card.get("question"))
         answer = normalize_text(card.get("answer"))
         difficulty = normalize_text(card.get("difficulty", "medium")).lower()
-        if not question or not answer or contains_similar_text(question, seen_questions):
+        if (
+            not question
+            or not answer
+            or contains_similar_text(question, seen_questions, threshold=0.62)
+            or not is_study_worthy(question)
+            or not is_study_worthy(answer)
+        ):
             continue
         if difficulty not in {"easy", "medium", "hard"}:
             difficulty = "medium"
@@ -68,6 +74,10 @@ def validate_quiz_questions(questions, count=None):
         if not question_text or not isinstance(choices, list) or not raw_correct_answer:
             continue
         choices = [normalize_text(choice) for choice in choices]
+        if set(choice.upper() for choice in choices) == {"A", "B", "C", "D"}:
+            continue
+        if len(question_text.split()) < 6:
+            continue
         if len(choices) != 4 or any(not choice for choice in choices):
             continue
         if has_duplicate_choices(choices):
@@ -125,3 +135,29 @@ def validate_revision_sessions(sessions, default_priority):
             "todo_priority": todo_priority,
         })
     return valid_sessions
+
+BAD_STUDY_TERMS = (
+    "@", "université", "ufr", "enseignant", "professeur",
+    "bibliographie", "modalités", "horaire", "plan du cours",
+    "table des matières", "introduction à", "email"
+)
+
+
+def is_study_worthy(text):
+    lowered = normalize_text(text).lower()
+
+    if any(term in lowered for term in BAD_STUDY_TERMS):
+        return False
+
+    if len(lowered) < 20:
+        return False
+
+    # Reject title-like fragments with almost no sentence structure
+    words = lowered.split()
+    if len(words) > 5 and not any(verb in words for verb in (
+        "est", "sont", "permet", "utilise", "consiste", "définit",
+        "calcule", "représente", "sert", "fonctionne", "applique"
+    )):
+        return False
+
+    return True

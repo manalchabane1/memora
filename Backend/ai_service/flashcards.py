@@ -6,8 +6,8 @@ from .validators import validate_flashcards
 
 def generate_flashcards_with_groq(text, count=10, difficulty="all", focus=""):
     content = call_groq_json(
-        build_flashcards_prompt(text, count, difficulty, focus),
+        build_flashcards_prompt(text, count + 4, difficulty, focus),
         JSON_ONLY_SYSTEM,
         temperature=0.1,
     )
-    return validate_flashcards(extract_json_array(content))[:count]
+    return validate_flashcards(extract_json_array(content))

@@ -52,3 +52,11 @@ def meaningful_sentences(text):
             continue
         candidates.append(normalized)
     return candidates
+
+def remove_bad_course_metadata(text):
+    text = re.sub(r"\S+@\S+", " ", text)
+    text = re.sub(r"\b[A-Z][a-z]+ [A-Z][a-z]+\b", " ", text)
+    text = re.sub(r"Université d[’']Aix[- ]Marseille.*", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"UFR Sciences.*", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"L3 Informatique.*", " ", text, flags=re.IGNORECASE)
+    return text

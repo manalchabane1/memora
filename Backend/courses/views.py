@@ -93,7 +93,7 @@ def generate_complete_set(generator, source, count, max_attempts=None, **options
         try:
             batch = generator(
                 source,
-                count=min(remaining, GENERATION_BATCH_SIZE),
+                count=min(remaining + 4, GENERATION_BATCH_SIZE),
                 **attempt_options,
             )
         except Exception:

@@ -236,7 +236,7 @@ class FlashcardPipelineTests(SimpleTestCase):
         self.assertEqual(len(cards), 5)
         self.assertEqual(generate.call_count, 2)
         self.assertEqual(generate.call_args_list[0].kwargs["count"], 5)
-        self.assertEqual(generate.call_args_list[1].kwargs["count"], 3)
+        self.assertEqual(generate.call_args_list[1].kwargs["count"], 7)
 
     @patch("ai_service.pipeline.build_balanced_contexts", return_value=["Cours utile"])
     @patch("ai_service.pipeline.generate_flashcards_with_groq")

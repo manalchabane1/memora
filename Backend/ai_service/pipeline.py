@@ -1,15 +1,15 @@
 import math
-import re
+import logging
 
 from .text_cleaning import clean_text
-from .chunking import split_text
-from .groq_service import contains_similar_text, generate_flashcards_with_groq
+from .chunking import build_balanced_contexts
+from .flashcards import generate_flashcards_with_groq
+from .similarity import contains_similar_text
 
+logger = logging.getLogger(__name__)
 
 GENERATION_BATCH_SIZE = 8
 SOURCE_CHUNK_SIZE = 7000
-MAX_SOURCE_CHUNKS = 8
-OVERGENERATION_FACTOR = 2
 
 
 def interleave_batches(batches):
@@ -24,152 +24,124 @@ def interleave_batches(batches):
     return interleaved
 
 
-def evenly_select(items, count):
-    if len(items) <= count:
-        return items
-
-    if count == 1:
-        return [items[len(items) // 2]]
-
-    return [
-        items[round(index * (len(items) - 1) / (count - 1))]
-        for index in range(count)
-    ]
+def build_flashcard_fallbacks(text, existing_cards, count, difficulty="all"):
+    # Kept for courses.views import compatibility.
+    # No raw fallback, because it creates ugly "Explique ce passage" cards.
+    return []
 
 
-def normalize_card(card, difficulty="all"):
-    if not isinstance(card, dict):
-        return None
+def add_unique_cards(target, cards, seen_questions, seen_answers=None):
+    if seen_answers is None:
+        seen_answers = []
 
-    question = (card.get("question") or "").strip()
-    answer = (card.get("answer") or "").strip()
-    card_difficulty = (card.get("difficulty") or "medium").strip().lower()
+    added = 0
 
-    if not question or not answer:
-        return None
-
-    if card_difficulty not in ["easy", "medium", "hard"]:
-        card_difficulty = "medium"
-
-    if difficulty != "all":
-        card_difficulty = difficulty
-
-    return {
-        "question": question,
-        "answer": answer,
-        "difficulty": card_difficulty,
-    }
-
-
-def add_unique_cards(target, cards, seen_questions, seen_answers, difficulty="all"):
     for card in cards or []:
-        normalized = normalize_card(card, difficulty)
-
-        if not normalized:
+        if not isinstance(card, dict):
             continue
 
-        question = normalized["question"]
-        answer = normalized["answer"]
+        question = (card.get("question") or "").strip()
+        answer = (card.get("answer") or "").strip()
+        difficulty = (card.get("difficulty") or "medium").strip().lower()
 
-        if contains_similar_text(question, seen_questions, threshold=0.72):
+        if not question or not answer:
             continue
 
-        if contains_similar_text(answer, seen_answers, threshold=0.74):
+        if difficulty not in {"easy", "medium", "hard"}:
+            difficulty = "medium"
+
+        if contains_similar_text(question, seen_questions, threshold=0.62):
+            continue
+
+        if contains_similar_text(answer, seen_answers, threshold=0.82):
             continue
 
         seen_questions.append(question)
         seen_answers.append(answer)
-        target.append(normalized)
+
+        target.append({
+            "question": question,
+            "answer": answer,
+            "difficulty": difficulty,
+        })
+
+        added += 1
+
+    return added
 
 
 def request_flashcards(chunk, count, difficulty, focus):
     try:
-        return generate_flashcards_with_groq(
+        cards = generate_flashcards_with_groq(
             chunk,
             count=count,
             difficulty=difficulty,
             focus=focus,
         )
+        logger.info("Flashcard request: asked=%s received=%s", count, len(cards or []))
+        return cards
     except Exception:
+        logger.exception("Flashcard generation attempt failed")
         return []
 
 
-def select_source_chunks(chunks, count):
-    if not chunks:
-        return []
-
-    useful_chunk_count = min(
-        len(chunks),
-        max(1, min(MAX_SOURCE_CHUNKS, count))
+def build_retry_focus(base_focus, remaining, existing_cards):
+    previous_questions = "; ".join(
+        card["question"] for card in existing_cards[-20:]
     )
 
-    return evenly_select(chunks, useful_chunk_count)
+    return (
+        f"{base_focus}. "
+        f"Il manque encore {remaining} flashcards. "
+        f"Génère de nouvelles flashcards différentes, sur des notions importantes du cours. "
+        f"Ne réutilise pas les mêmes idées. "
+        f"N'utilise pas de titres seuls, sommaires, emails, noms d'enseignants, universités ou plans de cours. "
+        f"Ne crée pas de question vague du type 'Explique ce passage'. "
+        f"Évite absolument ces questions déjà générées : {previous_questions}"
+    ).strip()
 
 
-def build_flashcard_fallbacks(text, existing_cards, count, difficulty="all"):
+def generate_ai_fallback_cards(source_chunks, existing_cards, count, difficulty, focus):
     missing = count - len(existing_cards)
 
     if missing <= 0:
         return []
 
-    snippets = [
-        sentence.strip()
-        for sentence in re.split(r"(?<=[.!?])\s+", text)
-        if 50 <= len(sentence.strip()) <= 700
-    ]
+    fallback_cards = []
+    seen_questions = [card["question"] for card in existing_cards]
+    seen_answers = [card["answer"] for card in existing_cards]
 
-    if not snippets:
-        snippets = [
-            text[index:index + 500].strip()
-            for index in range(0, len(text), 500)
-        ]
+    max_attempts = max(6, len(source_chunks))
 
-    snippets = [snippet for snippet in snippets if snippet]
-    snippets = evenly_select(snippets, missing * 2)
+    for attempt in range(max_attempts):
+        missing = count - len(existing_cards) - len(fallback_cards)
 
-    used_questions = [
-        (card.get("question") or "").strip()
-        for card in existing_cards
-        if isinstance(card, dict)
-    ]
-
-    used_answers = [
-        (card.get("answer") or "").strip()
-        for card in existing_cards
-        if isinstance(card, dict)
-    ]
-
-    fallback_difficulties = ["easy", "medium", "hard"]
-    fallbacks = []
-
-    for index, snippet in enumerate(snippets):
-        if len(fallbacks) >= missing:
+        if missing <= 0:
             break
 
-        question = "Quelle est l'idée principale de ce passage du cours ?"
-        if index > 0:
-            question = f"Quelle notion importante peut-on retenir du passage {index + 1} ?"
+        chunk = source_chunks[attempt % len(source_chunks)]
 
-        if contains_similar_text(question, used_questions, threshold=0.72):
-            continue
+        fallback_focus = build_retry_focus(
+            focus,
+            missing,
+            existing_cards + fallback_cards,
+        )
 
-        if contains_similar_text(snippet, used_answers, threshold=0.74):
-            continue
+        cards = request_flashcards(
+            chunk,
+            min(missing + 6, GENERATION_BATCH_SIZE),
+            difficulty,
+            fallback_focus,
+        )
 
-        used_questions.append(question)
-        used_answers.append(snippet)
+        add_unique_cards(
+            fallback_cards,
+            cards,
+            seen_questions,
+            seen_answers,
+        )
 
-        fallbacks.append({
-            "question": question,
-            "answer": snippet[:700],
-            "difficulty": (
-                fallback_difficulties[index % len(fallback_difficulties)]
-                if difficulty == "all"
-                else difficulty
-            ),
-        })
-
-    return fallbacks
+    return fallback_cards
 
 
 def generate_flashcards_pipeline(text, count=10, difficulty="all", focus=""):
@@ -178,34 +150,31 @@ def generate_flashcards_pipeline(text, count=10, difficulty="all", focus=""):
     if not cleaned_text:
         return []
 
-    source_chunks = split_text(cleaned_text, max_chars=SOURCE_CHUNK_SIZE)
+    source_chunks = build_balanced_contexts(
+        cleaned_text,
+        max_contexts=min(16, max(4, count)),
+        chunk_chars=SOURCE_CHUNK_SIZE,
+    )
 
     if not source_chunks:
         return []
-
-    selected_chunks = select_source_chunks(source_chunks, count)
 
     all_flashcards = []
     seen_questions = []
     seen_answers = []
 
-    target_generation_count = max(
-        count * OVERGENERATION_FACTOR,
-        count + 6
-    )
-
     cards_per_chunk = max(
         3,
-        math.ceil(target_generation_count / len(selected_chunks))
+        math.ceil((count * 2) / len(source_chunks)),
     )
 
     first_pass_batches = []
 
-    for chunk in selected_chunks:
+    for chunk in source_chunks:
         first_pass_batches.append(
             request_flashcards(
                 chunk,
-                min(cards_per_chunk, GENERATION_BATCH_SIZE),
+                min(cards_per_chunk + 3, GENERATION_BATCH_SIZE),
                 difficulty,
                 focus,
             )
@@ -216,33 +185,27 @@ def generate_flashcards_pipeline(text, count=10, difficulty="all", focus=""):
         interleave_batches(first_pass_batches),
         seen_questions,
         seen_answers,
-        difficulty,
     )
 
-    max_retries = 4
+    max_attempts = max(10, len(source_chunks) * 3)
 
-    for attempt in range(max_retries):
+    for attempt in range(max_attempts):
         remaining = count - len(all_flashcards)
 
         if remaining <= 0:
             break
 
-        chunk = selected_chunks[attempt % len(selected_chunks)]
+        chunk = source_chunks[attempt % len(source_chunks)]
 
-        previous_questions = "; ".join(
-            card["question"] for card in all_flashcards[-12:]
+        retry_focus = build_retry_focus(
+            focus,
+            remaining,
+            all_flashcards,
         )
-
-        retry_focus = (
-            f"{focus}. "
-            f"Il manque encore {remaining} flashcards. "
-            f"Génère de nouvelles questions différentes. "
-            f"Évite ces questions déjà générées : {previous_questions}"
-        ).strip()
 
         cards = request_flashcards(
             chunk,
-            min(remaining + 5, GENERATION_BATCH_SIZE),
+            min(remaining + 6, GENERATION_BATCH_SIZE),
             difficulty,
             retry_focus,
         )
@@ -252,19 +215,22 @@ def generate_flashcards_pipeline(text, count=10, difficulty="all", focus=""):
             cards,
             seen_questions,
             seen_answers,
+        )
+
+    if len(all_flashcards) < count:
+        fallback_cards = generate_ai_fallback_cards(
+            source_chunks,
+            all_flashcards,
+            count,
             difficulty,
+            focus,
         )
 
-    selected_cards = evenly_select(all_flashcards, count)
-
-    if len(selected_cards) < count:
-        selected_cards.extend(
-            build_flashcard_fallbacks(
-                cleaned_text,
-                selected_cards,
-                count,
-                difficulty,
-            )
+        add_unique_cards(
+            all_flashcards,
+            fallback_cards,
+            seen_questions,
+            seen_answers,
         )
 
-    return selected_cards[:count]
+    return all_flashcards[:count]
