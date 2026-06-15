@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("courses", "0002_add_missing_quiz_subject"),
+        # ("courses", "0002_add_missing_quiz_subject"),
         ("planning", "0002_revisionplan_exam_date_revisionplan_goal_and_more"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
