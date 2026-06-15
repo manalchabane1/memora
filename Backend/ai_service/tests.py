@@ -3,17 +3,19 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase
+from groq import RateLimitError
 
 from .chunking import build_balanced_contexts, select_relevant_chunks
 from .groq_service import JSON_RESPONSE_FORMAT, call_groq_json
 from .parsing import extract_json_array, match_correct_answer
 from .pdf_chat import ask_pdf_with_groq
-from .pipeline import generate_flashcards_pipeline
+from .pipeline import build_flashcard_fallbacks, generate_flashcards_pipeline
 from .planning import generate_revision_plan_with_groq
 from .prompts import build_flashcards_prompt
 from .quiz import generate_quiz_with_groq
 from .similarity import choice_sets_are_similar, has_duplicate_choices, texts_are_similar
 from .summary import generate_summary_with_groq
+from .validators import validate_flashcards
 
 
 class JsonExtractionTests(SimpleTestCase):
@@ -211,80 +213,161 @@ class ChunkingTests(SimpleTestCase):
 
 
 class FlashcardPipelineTests(SimpleTestCase):
-    @patch("ai_service.pipeline.build_balanced_contexts", return_value=["Cours utile"])
-    @patch("ai_service.pipeline.generate_flashcards_with_groq")
-    def test_pipeline_retries_with_only_the_missing_count(self, generate, _split):
-        generate.side_effect = [
-            [
-                {"question": "Q1", "answer": "A1", "difficulty": "easy"},
-                {"question": "Q2", "answer": "A2", "difficulty": "medium"},
-            ],
-            [
-                {"question": "Q3", "answer": "A3", "difficulty": "hard"},
-                {"question": "Q4", "answer": "A4", "difficulty": "easy"},
-                {"question": "Q5", "answer": "A5", "difficulty": "medium"},
-            ],
+    def cards(self, start, count):
+        return [
+            {
+                "question": f"Question distincte numéro {index}",
+                "answer": f"Réponse fiable et distincte numéro {index}",
+                "difficulty": "medium",
+            }
+            for index in range(start, start + count)
         ]
 
+    @patch(
+        "ai_service.pipeline.build_balanced_contexts",
+        return_value=["Début du cours.", "Fin du cours."],
+    )
+    @patch("ai_service.pipeline.extract_flashcard_facts_with_groq")
+    @patch("ai_service.pipeline.generate_flashcards_from_facts_with_groq")
+    def test_pipeline_extracts_facts_then_generates_cards_once(
+        self, generate, extract_facts, _chunks
+    ):
+        extract_facts.side_effect = [
+            ["Fait central du début", "Autre fait du début"],
+            ["Fait central de la fin", "Autre fait de la fin"],
+        ]
+        generate.return_value = self.cards(0, 3)
+
         cards = generate_flashcards_pipeline(
-            "Cours",
-            count=5,
+            "Cours complet",
+            count=3,
             difficulty="all",
             focus="Examens",
         )
 
-        self.assertEqual(len(cards), 5)
-        self.assertEqual(generate.call_count, 2)
-        self.assertEqual(generate.call_args_list[0].kwargs["count"], 5)
-        self.assertEqual(generate.call_args_list[1].kwargs["count"], 7)
+        self.assertEqual(len(cards), 3)
+        self.assertEqual(extract_facts.call_count, 2)
+        self.assertTrue(all(
+            call.kwargs["fact_count"] == 8
+            for call in extract_facts.call_args_list
+        ))
+        generate.assert_called_once()
+        self.assertIn("Fait central du début", generate.call_args.args[0])
+        self.assertIn("Fait central de la fin", generate.call_args.args[0])
 
     @patch("ai_service.pipeline.build_balanced_contexts", return_value=["Cours utile"])
-    @patch("ai_service.pipeline.generate_flashcards_with_groq")
-    def test_pipeline_discards_duplicate_questions_between_retries(self, generate, _split):
-        generate.return_value = [
-            {"question": "Same question", "answer": "Answer", "difficulty": "easy"},
+    @patch(
+        "ai_service.pipeline.extract_flashcard_facts_with_groq",
+        return_value=[f"Fait fiable numéro {index}" for index in range(30)],
+    )
+    @patch("ai_service.pipeline.generate_flashcards_from_facts_with_groq")
+    def test_pipeline_uses_only_one_repair_call_for_missing_cards(
+        self, generate, _extract_facts, _chunks
+    ):
+        generate.side_effect = [
+            self.cards(0, 2),
+            self.cards(2, 1),
         ]
 
-        cards = generate_flashcards_pipeline("Cours", count=5)
-
-        self.assertEqual(len(cards), 2)
-        self.assertEqual(len({card["question"] for card in cards}), 2)
-        self.assertEqual(generate.call_count, 3)
-
-    @patch("ai_service.pipeline.build_balanced_contexts", return_value=["Début du cours.", "Milieu du cours.", "Fin du cours."])
-    @patch("ai_service.pipeline.generate_flashcards_with_groq")
-    def test_pipeline_processes_every_pdf_chunk(self, generate, _split):
-        generate.side_effect = lambda text, **_options: [{
-            "question": f"Question sur {text}",
-            "answer": text,
-            "difficulty": "medium",
-        }]
-
-        cards = generate_flashcards_pipeline("Cours complet", count=3)
+        cards = generate_flashcards_pipeline("Cours", count=3)
 
         self.assertEqual(len(cards), 3)
+        self.assertEqual(generate.call_count, 2)
+        self.assertEqual(generate.call_args_list[0].kwargs["count"], 3)
+        self.assertEqual(generate.call_args_list[1].kwargs["count"], 1)
         self.assertEqual(
-            [call.args[0] for call in generate.call_args_list],
-            ["Début du cours.", "Milieu du cours.", "Fin du cours."],
+            generate.call_args_list[1].kwargs["previous_questions"],
+            [card["question"] for card in cards[:2]],
+        )
+        self.assertNotEqual(
+            generate.call_args_list[0].args[0],
+            generate.call_args_list[1].args[0],
         )
 
-    @patch("ai_service.pipeline.build_balanced_contexts", return_value=["Cours complet"])
-    @patch("ai_service.pipeline.generate_flashcards_with_groq", side_effect=RuntimeError("provider down"))
-    def test_pipeline_fills_requested_count_when_source_has_distinct_material(
-        self, _generate, _split
+    @patch(
+        "ai_service.pipeline.build_balanced_contexts",
+        return_value=[f"Section {index}" for index in range(10)],
+    )
+    @patch("ai_service.pipeline.extract_flashcard_facts_with_groq")
+    @patch("ai_service.pipeline.generate_flashcards_from_facts_with_groq", return_value=[])
+    def test_pipeline_limits_chunks_and_selected_facts(
+        self, generate, extract_facts, _chunks
     ):
-        text = (
-            "TCP garantit la livraison fiable des données entre deux machines. "
-            "UDP privilégie la rapidité et ne confirme pas chaque paquet transmis. "
-            "Le routage sélectionne un chemin pour acheminer les paquets sur le réseau. "
-            "Le chiffrement protège le contenu des messages contre une lecture non autorisée. "
-            "La compression réduit la quantité de données nécessaire à la transmission."
+        extract_facts.side_effect = lambda text, **_options: [
+            f"{text} fait distinct {index}" for index in range(8)
+        ]
+
+        cards = generate_flashcards_pipeline("Cours complet", count=5)
+
+        self.assertEqual(cards, [])
+        self.assertEqual(extract_facts.call_count, 8)
+        self.assertEqual(generate.call_count, 2)
+        facts_sent = {
+            fact
+            for call in generate.call_args_list
+            for fact in call.args[0]
+        }
+        self.assertLessEqual(len(facts_sent), 30)
+
+    @patch("ai_service.pipeline.build_balanced_contexts", return_value=["Cours utile"])
+    @patch("ai_service.pipeline.generate_flashcards_from_facts_with_groq")
+    @patch("ai_service.pipeline.extract_flashcard_facts_with_groq")
+    def test_pipeline_stops_immediately_on_fact_extraction_rate_limit(
+        self, extract_facts, generate, _chunks
+    ):
+        extract_facts.side_effect = RateLimitError(
+            "rate limited",
+            response=Mock(status_code=429, headers={}),
+            body=None,
         )
 
-        cards = generate_flashcards_pipeline(text, count=5)
+        cards = generate_flashcards_pipeline("Cours", count=3)
 
-        self.assertEqual(len(cards), 5)
-        self.assertTrue(all(card["question"] and card["answer"] for card in cards))
+        self.assertEqual(cards, [])
+        generate.assert_not_called()
+
+    @patch("ai_service.pipeline.build_balanced_contexts", return_value=["Cours utile"])
+    @patch(
+        "ai_service.pipeline.extract_flashcard_facts_with_groq",
+        return_value=[f"Fait fiable numéro {index}" for index in range(30)],
+    )
+    @patch("ai_service.pipeline.generate_flashcards_from_facts_with_groq")
+    def test_pipeline_returns_existing_cards_when_repair_is_rate_limited(
+        self, generate, _extract_facts, _chunks
+    ):
+        generate.side_effect = [
+            self.cards(0, 2),
+            RateLimitError(
+                "rate limited",
+                response=Mock(status_code=429, headers={}),
+                body=None,
+            ),
+        ]
+
+        cards = generate_flashcards_pipeline("Cours", count=3)
+
+        self.assertEqual(cards, self.cards(0, 2))
+        self.assertEqual(generate.call_count, 2)
+
+    def test_raw_text_flashcard_fallback_is_disabled(self):
+        self.assertEqual(
+            build_flashcard_fallbacks(
+                "Texte brut du cours",
+                existing_cards=[],
+                count=5,
+                difficulty="all",
+            ),
+            [],
+        )
+
+    def test_flashcard_validation_keeps_concise_reliable_answers(self):
+        cards = validate_flashcards([{
+            "question": "Quelle différence existe entre TCP et UDP ?",
+            "answer": "TCP est fiable",
+            "difficulty": "easy",
+        }])
+
+        self.assertEqual(len(cards), 1)
 
 
 class SummaryGenerationTests(SimpleTestCase):

@@ -268,7 +268,7 @@ class CoursesAPITests(TestCase):
 
     @patch("courses.views.extract_text_from_pdf", return_value="Cours utile")
     @patch("courses.views.generate_flashcards_pipeline", return_value=[])
-    def test_incomplete_flashcard_generation_saves_fallback_cards(self, _generate, _extract):
+    def test_incomplete_flashcard_generation_saves_partial_result(self, _generate, _extract):
         deck = self.create_deck()
         Flashcard.objects.create(deck=deck, question="Existing", answer="Answer")
 
@@ -279,7 +279,7 @@ class CoursesAPITests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(deck.flashcards.count(), 1)
+        self.assertEqual(deck.flashcards.count(), 0)
         self.assertNotIn("Existing", deck.flashcards.values_list("question", flat=True))
 
     @patch("courses.views.generate_personal_quiz_with_groq")

@@ -51,6 +51,98 @@ Section du cours:
 """
 
 
+def build_flashcard_facts_prompt(text, fact_count, focus=""):
+    focus_instruction = focus or "les notions les plus importantes du cours"
+
+    return f"""
+Tu analyses une section de cours afin de préparer des flashcards de révision.
+Extrais entre 5 et {fact_count} faits pédagogiques atomiques, fiables et utiles en examen
+si la section contient assez de matière. Retourne-en moins uniquement si elle ne contient
+pas 5 idées fiables.
+
+Un fait atomique est une idée complète et autonome, compréhensible sans le document original:
+- une définition
+- une propriété
+- une formule accompagnée de sa signification
+- une étape d'algorithme
+- une méthode
+- une relation entre concepts
+- une condition ou une conséquence
+
+Contraintes obligatoires:
+- réponds uniquement en français
+- concentre-toi sur: {focus_instruction}
+- privilégie les faits centraux et diversifiés
+- chaque fait doit être fidèle à la section et suffisamment complet pour créer une flashcard
+- un fait peut être détaillé; ne le raccourcis pas au point de perdre son sens
+- fusionne les idées redondantes
+- n'invente jamais d'information
+- chaque fait doit être autonome mais compact: maximum 35 mots
+
+Ignore obligatoirement:
+- titres seuls, en-têtes de diapositives, plans et tables des matières
+- noms d'enseignants, auteurs, universités et adresses email
+- texte administratif, bibliographies, liens et modalités
+- blagues, anecdotes et exemples isolés sans concept général
+
+Réponds uniquement avec cet objet JSON:
+{{"facts": ["fait autonome 1", "fait autonome 2"]}}
+
+Section du cours:
+{text}
+"""
+
+
+def build_flashcards_from_facts_prompt(
+    facts,
+    count,
+    difficulty="all",
+    focus="",
+    previous_questions=None,
+):
+    difficulty_instruction = (
+        "répartis les difficultés entre easy, medium et hard"
+        if difficulty == "all"
+        else f"toutes les cartes doivent avoir la difficulté {difficulty}"
+    )
+    focus_instruction = focus or "les notions les plus importantes du cours"
+    previous_questions = previous_questions or []
+    previous_instruction = (
+        "Évite absolument les questions déjà générées suivantes: "
+        f"{json.dumps(previous_questions, ensure_ascii=False)}"
+        if previous_questions
+        else "Aucune question précédente à éviter."
+    )
+
+    return f"""
+Tu es un assistant pédagogique expert en création de flashcards.
+Génère EXACTEMENT {count} flashcards distinctes à partir des faits vérifiés fournis.
+Retourne moins de cartes uniquement si les faits ne contiennent vraiment pas assez de connaissances fiables.
+
+Réponds uniquement avec cet objet JSON:
+{{"items": [{{"question": "question claire", "answer": "réponse précise", "difficulty": "easy"}}]}}
+
+Contraintes obligatoires:
+- réponds uniquement en français
+- {difficulty_instruction}
+- concentre-toi sur: {focus_instruction}
+- teste uniquement des définitions, concepts, méthodes, algorithmes, formules, mécanismes ou relations
+- chaque question doit tester une connaissance différente et utile en examen
+- chaque réponse doit être précise, autonome et fidèle aux faits
+- difficulty doit être easy, medium ou hard
+- n'invente jamais d'information et n'ajoute aucun champ
+- {previous_instruction}
+
+Interdictions:
+- aucune question sur un titre, un plan, une personne, une université, un email ou du texte administratif
+- aucune question sur une blague, une anecdote ou un exemple isolé
+- aucune question vague du type "Explique ce passage"
+
+Faits vérifiés:
+{json.dumps(facts, ensure_ascii=False)}
+"""
+
+
 def build_summary_facts_prompt(text, fact_count, instructions=""):
     focus = instructions or "les notions les plus importantes du cours"
     return f"""

@@ -21,7 +21,7 @@ def validate_flashcards(cards):
             or not answer
             or contains_similar_text(question, seen_questions, threshold=0.62)
             or not is_study_worthy(question)
-            or not is_study_worthy(answer)
+            or not is_study_worthy(answer, allow_concise=True)
         ):
             continue
         if difficulty not in {"easy", "medium", "hard"}:
@@ -143,16 +143,22 @@ BAD_STUDY_TERMS = (
 )
 
 
-def is_study_worthy(text):
+def is_study_worthy(text, allow_concise=False):
     lowered = normalize_text(text).lower()
 
     if any(term in lowered for term in BAD_STUDY_TERMS):
         return False
 
+    if allow_concise:
+        return len(lowered) >= 2
+
     if len(lowered) < 20:
         return False
 
-    # Reject title-like fragments with almost no sentence structure
+    if lowered.endswith("?"):
+        return True
+
+    # Reject title-like fragments with almost no sentence structure.
     words = lowered.split()
     if len(words) > 5 and not any(verb in words for verb in (
         "est", "sont", "permet", "utilise", "consiste", "définit",
